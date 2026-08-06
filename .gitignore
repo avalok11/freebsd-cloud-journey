@@ -1,0 +1,24 @@
+# Заметки, скрипты и черновики
+*.draft.md
+drafts/
+scripts/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# Локальные override-файлы
+.env
+.env.local
+*.local.yml
+
+# Временные файлы
+*.tmp
+*.swp
+*~
+
+# Большие бинарники (скриншоты храним отдельно или в releases)
+*.iso
+*.img
+*.vmdk
+*.qcow2
