@@ -161,14 +161,26 @@
 5. Настроить SSH: `pkg install openssh-portable` (если не установлен), либо использовать встроенный.
 6. На Mac сгенерировать ключ: `ssh-keygen -t ed25519 -f ~/.ssh/freebsd_lab`.
 7. Скопировать ключ на FreeBSD: `ssh-copy-id -i ~/.ssh/freebsd_lab.pub alexey@fbsd-arm.lab.local`.
-8. На FreeBSD создать пользователя `alexey` с группой `wheel` (для sudo).
-9. **Харденинг sshd_config** на FreeBSD: отключить `PasswordAuthentication`, отключить `PermitRootLogin`, разрешить только группу `wheel` (позже добавим `ssh-users`).
-10. **Защита SSH от брутфорса через PF + sshguard** (BSD-native, аналог fail2ban в Linux):
+8. На FreeBSD создать пользователя `alexey` с группой `wheel` (для sudo). Это делаем во время установки системы.
+9. Добавляем в ~/.cshrc настройки:
+
+Подсветка консоли и листинга ls:
+    
+    setenv	CLICOLOR 1
+    
+    setenv	LSCOLORS gxfxcxdxbxegedabagacad
+
+Подсветка промта:
+
+    set prompt = "%{\033[31m%}%n%{\033[33m%}@%m%{\033[36m%}:%~%{\033[37m%}%#%{\033[0m%} "
+
+10. **Харденинг sshd_config** на FreeBSD: отключить `PasswordAuthentication`, отключить `PermitRootLogin`, разрешить только группу `wheel` (позже добавим `ssh-users`).
+11. **Защита SSH от брутфорса через PF + sshguard** (BSD-native, аналог fail2ban в Linux):
     - `pkg install sshguard`.
     - Добавить таблицу `sshguard` в `/etc/pf.conf` и правило блокировки на этапе `rdr`/`block` для ssh.
     - Включить sshguard: `sysrc sshguard_enable=YES`.
     - Проверить: запустить 10 неудачных попыток входа → IP попадает в таблицу `pfctl -t sshguard -T show`, доступ блокируется.
-11. **TOTP через Yandex Key** (двухфакторка для SSH):
+12. **TOTP через Yandex Key** (двухфакторка для SSH):
     - `pkg install oath-toolkit` и `pam_google_authenticator` (в FreeBSD это `security/pam_google_authenticator` из портов или пакета).
     - Под пользователем `alexey` запустить `google-authenticator` → получить QR-код.
     - Отсканировать QR-код в Yandex Key.
@@ -176,7 +188,7 @@
     - В `/etc/ssh/sshd_config` установить `ChallengeResponseAuthentication yes` и `AuthenticationMethods publickey,keyboard-interactive:pam` (ключ + TOTP).
     - Проверить: войти по ключу → TOTP запрашивается.
     - **Важно:** сохранить scratch-коды восстановления в надёжном месте (1Password / бумажка).
-12. Создать ВМ `deb-arm` с Debian 12 arm64: те же параметры. Будет использоваться для Linux-сравнения.
+13. Создать ВМ `deb-arm` с Debian 12 arm64: те же параметры. Будет использоваться для Linux-сравнения.
 
 **Шаг 2. Удалённый стенд (Selectel):**
 
