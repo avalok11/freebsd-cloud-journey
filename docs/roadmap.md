@@ -162,17 +162,13 @@ Mac M4 — **управляющая консоль**, не часть класт
 6. На Mac сгенерировать ключ: `ssh-keygen -t ed25519 -f ~/.ssh/freebsd_lab`.
 7. Скопировать ключ на FreeBSD: `ssh-copy-id -i ~/.ssh/freebsd_lab.pub alexey@fbsd-arm.lab.local`.
 8. На FreeBSD создать пользователя `alexey` с группой `wheel` (для sudo). Это делаем во время установки системы.
-9. Добавляем в ~/.cshrc настройки:
+9. Добавляем в ~/.shrc настройки подсветки консоли:
 
 Подсветка консоли и листинга ls:
     
     setenv	CLICOLOR 1
     
     setenv	LSCOLORS gxfxcxdxbxegedabagacad
-
-Подсветка промта:
-
-    set prompt = "%{\033[31m%}%n%{\033[33m%}@%m%{\033[36m%}:%~%{\033[37m%}%#%{\033[0m%} "
 
 10. **Харденинг sshd_config** на FreeBSD: отключить `PasswordAuthentication`, отключить `PermitRootLogin`, разрешить только группу `wheel` (позже добавим `ssh-users`).
 11. **Защита SSH от брутфорса через PF + sshguard** (BSD-native, аналог fail2ban в Linux):

@@ -1,47 +1,149 @@
 # Фаза 0 — Подготовка стенда
 
-**Статус:** в работе / завершена (обновлять по факту)
+**Статус:** в работе
 **Период:** август 2026
 **Цель фазы:** развёрнутый стенд (локально + Selectel), согласованная архитектурная схема, базовая безопасность.
 
 ## Что сделано
 
-- [ ] Установлен UTM (или VMware Fusion) на Mac M4
-- [ ] Создана ВМ `fbsd-arm` с FreeBSD 15.1 arm64
-- [ ] Установлена система, базовая настройка
-- [ ] Настроен SSH по ключу
-- [ ] Харденинг sshd_config
-- [ ] Установлен sshguard + интеграция с PF
-- [ ] Настроен TOTP через Yandex Key
-- [ ] Создан GitHub-репозиторий `freebsd-cloud-journey`
-- [ ] Схема архитектуры в Mermaid
-- [ ] Создан VPS в Selectel с FreeBSD
-- [ ] Подключение к Selectel по ключу
-- [ ] Алиасы в `~/.ssh/config` на Mac M4
+### Локальный стенд (UTM на Mac M4)
+
+- [x] Установлен UTM на Mac M4
+- [x] Создана ВМ `fbsd-arm` с FreeBSD 15.1 arm64 (IP `192.168.64.2`)
+- [x] Установлена система, базовая настройка (ZFS root, hostname, timezone)
+- [x] Настроен SSH по ключу (`~/.ssh/freebsd_lab`)
+- [x] Харденинг sshd_config (отключён вход по паролю, root)
+- [x] Установлен sshguard + интеграция с PF (тестировано — бан IP работает)
+- [x] Настроен TOTP через Yandex Key (вход по ключу + 6-значный код)
+- [x] ntpd для синхронизации времени (без этого TOTP не работал)
+- [x] Переход с tcsh на sh как login shell
+- [x] Создана ВМ `deb-arm` с Debian 13.6 arm64 (IP `192.168.64.4`) для сравнения с Linux
+- [x] SSH по ключу + харденинг sshd на deb-arm
+- [x] Создан GitHub-репозиторий `freebsd-cloud-journey` (avalok11)
+- [x] Схема архитектуры в Mermaid (обновляется)
+
+### Удалённый стенд (Selectel)
+
+- [x] Создан VPS `fbsd-1-sel` в Selectel (FreeBSD 15.1 amd64, публичный IP `178.72.xxx.xxx`)
+- [x] Создан пользователь `white` с группой `wheel` + sudo
+- [x] Настроен SSH по ключу + TOTP через Yandex Key
+- [x] Настроен ntpd
+- [x] Активирован sshguard + PF (как на fbsd-arm, тест блокировки пройден)
+
+### Репозитории
+
+- [x] GitHub `freebsd-cloud-journey` (публичный) — кейс, roadmap, теория, отчёты
+- [ ] Gitea `infra-configs` (приватный) — будет в Фазе 4
 
 ## Ключевые решения
 
-(заполнять по ходу — что выбрали, почему, что отвергли)
+### Стек выбран
+- **FreeBSD 15.1** (актуальная версия на момент 2026) — богатая база, ZFS из коробки, jails.
+- **Debian 13.6** для сравнения с Linux (современный, стабильный).
+- **UTM на Mac M4** для локальных ВМ (VirtualBox не подходит на M4).
+- **Selectel** для production-like стенда (до 10к ₽/мес).
+
+### Безопасность
+- Вход только по ключу + TOTP (двухфакторка).
+- sshguard + PF как защита от брутфорса (BSD-native, не fail2ban).
+- `PasswordAuthentication no` везде.
+- `PermitRootLogin no` везде.
+- Логин-шелл — sh (POSIX-совместимо, никаких сюрпризов).
+
+### Хостинг
+- Ноутбук = рабочая станция, не часть кластера.
+- Динамический домашний IP — не проблема, все подключения инициируются к Selectel.
+- GitHub публичный — для портфолио.
+- Gitea (планируется) — приватный для конфигов.
 
 ## Грабли и открытия
 
-(заполнять по ходу)
+### 1. VirtualBox на Mac M4 не работает
+- Решение: UTM (нативная поддержка arm64).
+
+### 2. TOTP не работал из-за рассинхронизации времени
+- Симптом: код из Яндекс Ключ не принимался.
+- Причина: системные часы FreeBSD отставали от UTC.
+- Решение: `service ntpd start` + `ntpdate -s time.cloudflare.com`.
+
+### 3. sshguard не реагирует на неудачные SSH-ключи
+- Причина: sshguard парсит только события неудачного ввода пароля, а у нас `PasswordAuthentication no`.
+- Решение: для теста временно включить `PasswordAuthentication yes`, проверить, что IP попадает в таблицу. В проде — защита от брутфорса обеспечивается отключением пароля.
+
+### 4. sshd ругался на `AuthenticationMethods`
+- Симптом: `Disabled method "keyboard-interactive"`.
+- Решение: добавить `ChallengeResponseAuthentication yes` и `KbdInteractiveAuthentication yes` в `sshd_config`.
+
+### 5. PAM запрашивал пароль после успешного TOTP
+- Причина: `pam_unix.so` стоял как `required` в PAM-стеке, выполнялся после TOTP.
+- Решение: сделать `pam_google_authenticator.so` как `sufficient` и поставить ПЕРВЫМ в `/etc/pam.d/sshd`.
+
+### 6. sshguard на fbsd-1-sel
+- Настроен по образцу fbsd-arm: `pkg install sshguard`, таблица `<sshguard>` в `/etc/pf.conf`, сервис через `sysrc sshguard_enable=YES`.
+- Тест блокировки пройден.
+- **Особенность**: на публичном IP брутфорс начинается в первые минуты после создания. За первый час — десятки `Failed password` в `/var/log/auth.log` от ботов.
 
 ## Метрики
 
 | Что | Значение |
 |---|---|
-| Время установки FreeBSD 15.1 arm64 в UTM | _мин |
-| Время на базовую настройку + SSH-ключи | _мин |
-| Время на настройку sshguard + PF | _мин |
-| Время на настройку TOTP | _мин |
-| Стоимость VPS в Selectel | _ ₽/мес |
+| Время установки FreeBSD 15.1 arm64 в UTM | ~30 мин |
+| Время на базовую настройку + SSH-ключи | ~20 мин |
+| Время на настройку sshguard + PF | ~30 мин (с тестом блокировки) |
+| Время на настройку TOTP (с решением граблей со временем) | ~40 мин |
+| Время на установку deb-arm (Debian 13) | ~15 мин |
+| Стоимость fbsd-1-sel в Selectel | ~1200 ₽/мес (2 vCPU, 4 ГБ, 30 ГБ SSD) |
 
 ## Артефакты
 
-- [architecture.md](../architecture.md) — обновлённая схема
+- [architecture.md](../architecture.md) — обновлённая схема с фактическими IP
 - [roadmap.md](../roadmap.md) — план
+- Теоретические заметки (Phase 0):
+  - [01-bsd-vs-linux.md](./01-bsd-vs-linux.md)
+  - [02-freebsd-architecture.md](./02-freebsd-architecture.md)
+  - [03-stack-choice.md](./03-stack-choice.md)
+  - [04-scaling.md](./04-scaling.md)
+  - [05-shells.md](./05-shells.md)
+  - [06-hybrid-stand.md](./06-hybrid-stand.md)
 
 ## Скриншоты / вывод команд
 
-(вставлять сюда блоки `uname -a`, `ifconfig`, `pfctl -t sshguard -T show` и т.п.)
+### fbsd-arm (локально)
+
+```
+uname -a:
+FreeBSD fbsd-arm 15.1-RELEASE FreeBSD 15.1-RELEASE releng/15.1-n283562-96841ea08dcf GENERIC arm64
+
+freebsd-version:
+15.1-RELEASE
+```
+
+### deb-arm (локально)
+
+```
+uname -a:
+Linux deb-arm 6.12.101+deb13-arm64 #1 SMP Debian 6.12.101-1 (2026-08-05) aarch64 GNU/Linux
+
+cat /etc/debian_version:
+13.6
+```
+
+### fbsd-1-sel (Selectel)
+
+```
+uname -a:
+FreeBSD fbsd-1-sel.lab.sel 15.1-RELEASE FreeBSD 15.1-RELEASE releng/15.1-n283562-96841ea08dcf GENERIC amd64
+
+freebsd-version:
+15.1-RELEASE
+
+ifconfig vtnet0:
+inet 172.16.0.2 netmask 0xffff0000 broadcast 172.16.255.255
+```
+
+## Что дальше
+
+После завершения Фазы 0:
+- **Фаза 1** — сеть + ZFS + сервисный SSH (3 недели).
+- **Фаза 2** — jails + Bastille + bhyve (3 недели).
+- И далее по roadmap.
