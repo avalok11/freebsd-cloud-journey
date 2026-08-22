@@ -84,7 +84,7 @@ graph TB
 - ✅ sshguard + PF (активирован, таблица `<sshguard>`, тест блокировки пройден).
 - ✅ ntpd для синхронизации времени.
 - ✅ NTP-сервер time.cloudflare.com.
-- ⏳ **SSH CA (Фаза 0.1):** User CA + Host CA на fbsd-1-sel, подписанные ключи с TTL 8 часов, CRL для отзыва.
+- ⏳ **SSH CA (Фаза 0.1):** User CA + Host CA на `fbsd-ca-sel` (отдельная нода в Selectel), подписанные ключи с TTL 8 часов, CRL для отзыва.
 
 ## Что нужно донастроить (задачи)
 
