@@ -7,12 +7,13 @@
 ```mermaid
 graph TB
     subgraph Laptop[Mac M4 — рабочая станция админа]
-        Console[Ansible-консоль<br/>ssh-keys + playbook'и<br/>~/.ssh/freebsd_lab]
+        Console[Ansible-консоль<br/>ssh-keys + сертификаты<br/>~/.ssh/freebsd_lab]
         GH[freebsd-cloud-journey<br/>GitHub, публичный<br/>github.com/avalok11/...]
     end
 
     subgraph Selectel["Selectel VPS, регион Москва (≤10 000 ₽/мес)"]
         F1["<b>fbsd-1-sel</b><br/>FreeBSD 15.1 amd64<br/>публичный 178.72.xxx.xxx<br/>внутренний 172.16.0.2<br/>vtnet0"]
+        CA["<b>fbsd-ca-sel</b><br/>FreeBSD 15.1 amd64<br/>мини-CA<br/>только sshd<br/>(Фаза 0.1)"]
         F2["fbsd-2-sel<br/>app node<br/>(запланировано)"]
         F3["fbsd-3-sel<br/>storage<br/>(запланировано)"]
         L1["deb-1-sel<br/>linux<br/>(запланировано)"]
@@ -24,11 +25,14 @@ graph TB
         DARM["<b>deb-arm</b><br/>Debian 13.6 arm64<br/>192.168.64.4<br/>сравнение"]
     end
 
-    Console -->|ssh по ключу + TOTP| F1
+    Console -->|ssh + TOTP<br/>сертификат CA| F1
+    Console -->|ssh + сертификат| CA
     Console -->|ssh по ключу| FARM
     Console -->|ssh по ключу| DARM
     Console -->|git push| GH
-    GH -.публичный кейс.-> Console
+    CA -.подписывает ключи.-> Console
+    CA -.подписывает host-ключи.-> F1
+    CA -.подписывает host-ключи.-> FARM
     F1 -.будет CARP.-> F2
     F2 -.ZFS replication.-> F3
     Gitea -.хранит.-> InfraCfg[infra-configs<br/>приватный репо]
@@ -51,6 +55,7 @@ graph TB
 | Нода | Хостнейм | ОС | Внешний IP | Внутренний IP | Назначение | Статус |
 |---|---|---|---|---|---|---|
 | **fbsd-1-sel** | `fbsd-1-sel.lab.sel` | FreeBSD 15.1-RELEASE amd64 | `178.72.xxx.xxx` (замазан) | `172.16.0.2/16` (vtnet0) | Шлюз, тест-нода | **активен**, sshguard + TOTP |
+| **fbsd-ca-sel** | `fbsd-ca-sel.lab.sel` | FreeBSD 15.1-RELEASE amd64 | (будет в Фазе 0.1) | (будет в Фазе 0.1) | Мини-CA, только sshd | **планируется, Фаза 0.1** |
 
 ### Локальный стенд (UTM на Mac M4)
 
@@ -79,6 +84,7 @@ graph TB
 - ✅ sshguard + PF (активирован, таблица `<sshguard>`, тест блокировки пройден).
 - ✅ ntpd для синхронизации времени.
 - ✅ NTP-сервер time.cloudflare.com.
+- ⏳ **SSH CA (Фаза 0.1):** User CA + Host CA на fbsd-1-sel, подписанные ключи с TTL 8 часов, CRL для отзыва.
 
 ## Что нужно донастроить (задачи)
 

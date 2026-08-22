@@ -56,7 +56,11 @@
 - [`docs/roadmap.md`](./docs/roadmap.md) — полный план по фазам
 - [`docs/architecture.md`](./docs/architecture.md) — диаграмма целевой архитектуры
 
-### Фаза 0 — Подготовка стенда (в работе)
+### Фаза 0.1 — SSH Certificate Authority (мини-CA) (в работе)
+
+- [`docs/phase-0.1/README.md`](./docs/phase-0.1/README.md) — план и чек-листы по настройке мини-CA на `fbsd-ca-sel` (отдельная нода в Selectel)
+
+### Фаза 0 — Подготовка стенда (завершена)
 
 - [`docs/phase-0/01-bsd-vs-linux.md`](./docs/phase-0/01-bsd-vs-linux.md) — философия ядра BSD vs Linux, лицензии, что это значит для продакшена
 - [`docs/phase-0/02-freebsd-architecture.md`](./docs/phase-0/02-freebsd-architecture.md) — что под капотом FreeBSD 14/15, сравнение с RHEL/Debian, нюанс arm64 vs amd64
