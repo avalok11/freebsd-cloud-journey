@@ -65,9 +65,12 @@
 - [`docs/phase-0/05-shells.md`](./docs/phase-0/05-shells.md) — разделение ролей: tcsh для интерактива, bash+Python для скриптов
 - [`docs/phase-0/06-hybrid-stand.md`](./docs/phase-0/06-hybrid-stand.md) — почему ноутбук не часть кластера, динамический IP не баг
 
-### Фаза 1 — FreeBSD актуальный: сеть, ZFS, базовый сервисный SSH (запланирована)
+### Фаза 1 — FreeBSD актуальный: сеть, ZFS, базовый сервисный SSH (в работе)
 
-- ...теоретические заметки и отчёт появятся по ходу фазы.
+- [`docs/phase-1/01-network-stack.md`](./docs/phase-1/01-network-stack.md) — сетевой стек FreeBSD vs Linux: ifconfig vs ip, netstat vs ss, rc.conf
+- [`docs/phase-1/02-pf-vs-iptables.md`](./docs/phase-1/02-pf-vs-iptables.md) — PF vs iptables/nftables, история, синтаксис
+- [`docs/phase-1/03-zfs-advanced.md`](./docs/phase-1/03-zfs-advanced.md) — ZFS продвинутый: ARC, zpool, dataset, snapshot, send/receive, encryption, dedup
+- [`docs/phase-1/04-bhyve-vs-kvm.md`](./docs/phase-1/04-bhyve-vs-kvm.md) — bhyve vs KVM vs VMware ESXi, нюанс arm64
 
 ## Контакты
 
