@@ -83,6 +83,25 @@
 - Тест блокировки пройден.
 - **Особенность**: на публичном IP брутфорс начинается в первые минуты после создания. За первый час — десятки `Failed password` в `/var/log/auth.log` от ботов.
 
+### 7. fbsd-arm завис на `mountroot>` после ребута в UTM
+- **Симптом:** загрузка FreeBSD прерывалась в `mountroot>`, сообщение `Mounting from zfs:zroot/ROOT/default failed with error 2: unknown file system`. `boot -s` (single user) тоже упирался в `mountroot>` — не успевал импортировать пул.
+- **Причина:** UTM после рестарта пересоздаёт виртуальный USB-стек, и ядро FreeBSD зависало на `Root mount waiting for: usbus0`, не доходя до импорта ZFS-пула. Пул `zroot` оставался не активирован.
+- **Восстановление через loader prompt (`Escape to loader prompt`, опция `3` в boot-меню):**
+  1. `lsdev` — посмотреть доступные диски.
+  2. `set currdev="zfs:zroot/ROOT/default:"` — задать текущее устройство.
+  3. `load /boot/kernel/kernel` — загрузить ядро вручную.
+  4. `load /boot/kernel/zfs.ko` — загрузить модуль ZFS.
+  5. `set hint.uhub.0.port.1.disabled="1"` — отключить первый порт USB-хаба (именно он блокировал загрузку). **Не весь `uhub.0.disabled=1`, иначе клавиатура в UTM перестаёт работать.**
+  6. `boot` — продолжить загрузку.
+- **Постоянное решение** — закрепить в `/boot/loader.conf`:
+  ```ini
+  zfs_load="YES"
+  hint.uhub.0.port.1.disabled="1"
+  pf_load="YES"
+  ```
+  И в случае повторения — добавить `vfs.root.mountfrom="zfs:zroot/ROOT/default"`.
+- **Урок:** в UTM `hint.uhub.0.disabled="1"` (полное отключение USB) отрубает клавиатуру, и ты теряешь контроль над ВМ. Отключать нужно только проблемный порт: `hint.uhub.0.port.N.disabled="1"`. Номер порта определяется через `lsdev` в loader prompt.
+
 ## Метрики
 
 | Что | Значение |

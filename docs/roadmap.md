@@ -328,15 +328,17 @@ graph TB
 - **Сравнение с SSH Key Distribution:** почему раскопировать `authorized_keys` хуже, чем один CA-файл.
 
 ### Практика
-1. **Создать `fbsd-ca-sel` в Selectel** (1 vCPU, 1 ГБ RAM, 10 ГБ SSD, FreeBSD 15.1 amd64).
-2. Базовый харденинг: sshd_config, sshguard + PF, отключение пароля.
-3. На `fbsd-ca-sel` сгенерировать пару ключей User CA: `ssh-keygen -f user_ca -C "User CA"`.
-4. Сгенерировать Host CA: `ssh-keygen -f host_ca -C "Host CA"`.
-5. Защитить приватные ключи CA: `chmod 600 user_ca host_ca`, скопировать в `/root/.ssh/ca/`. Бэкап в 1Password.
-6. Создать скрипт `sign-user-cert.sh` для подписи пользовательских ключей с TTL.
+1. **Создать `fbsd-ca-sel` в Selectel** (1 vCPU, 1 ГБ RAM, 10 ГБ SSD, FreeBSD 15.1 amd64, публичный IP).
+2. Базовый харденинг: sshd_config, sshguard + PF, NTP, TOTP.
+3. **Структура каталогов** `/usr/local/sshca/` (users/, hosts/, revoked/, scripts/).
+4. Генерация User CA и Host CA в `/usr/local/sshca/`.
+5. Защита приватных ключей: chmod 600, бэкап в 1Password.
+6. Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh` в `/usr/local/sshca/scripts/`.
 7. С Mac M4: подписать `~/.ssh/freebsd_lab.pub`:
    ```
-   ssh-keygen -s user_ca -I "alexey" -n alexey,white,root -V +8h:00 ~/.ssh/freebsd_lab.pub
+   scp ~/.ssh/freebsd_lab.pub fbsd-ca-sel:/tmp/
+   ssh fbsd-ca-sel "/usr/local/sshca/scripts/sign-user-cert.sh /tmp/freebsd_lab.pub white,root +8h:00"
+   scp fbsd-ca-sel:/usr/local/sshca/users/white/freebsd_lab-cert.pub ~/.ssh/
    ```
 8. На всех FreeBSD-нодах (`fbsd-arm`, `fbsd-1-sel`):
    - Скопировать `user_ca.pub` в `/etc/ssh/ca/user_ca.pub`.
@@ -349,7 +351,7 @@ graph TB
      ```
    - Подписать host-ключ:
      ```
-     ssh-keygen -s host_ca -h -I fbsd-1-sel -V +52w /etc/ssh/sshd_host_ed25519_key.pub
+     ssh-keygen -s /usr/local/sshca/host_ca -h -I fbsd-1-sel -V +52w /etc/ssh/sshd_host_ed25519_key.pub
      ```
    - Перезапустить sshd.
 9. Проверить: с Mac M4 зайти по сертификату (без указания ключа, ssh сам выберет).
