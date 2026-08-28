@@ -4,7 +4,7 @@
 #   revoke-ssh.sh user <username> <keyname>
 #   revoke-ssh.sh host <hostname> <keyname>
 # Пример:
-#   revoke-ssh.sh user white freebsd_lab
+#   revoke-ssh.sh user avalok11 freebsd_lab
 #   revoke-ssh.sh host fbsd-1-sel sshd_host_ed25519_key
 
 set -e

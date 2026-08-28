@@ -148,7 +148,7 @@ Bash-вариант встречается в **любом** учебнике, *
 defaultrouter="..."
 
 # /etc/passwd
-alexey:*:1000:1000:Alexey:/home/alexey:/bin/tcsh
+avalok11:*:1000:1000:avalok11:/home/avalok11:/bin/sh
 ```
 
 **В скриптах автоматизации (Ansible-роли, Bastillefile, мониторинг):**

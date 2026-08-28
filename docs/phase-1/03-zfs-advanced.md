@@ -371,7 +371,7 @@ zfs set compression=lz4 tank
 zfs snapshot tank/jails@$(date +%Y-%m-%d)
 
 # Репликация на fbsd-arm (для теста)
-zfs send tank/jails@snap1 | ssh white@192.168.64.2 "zfs receive tank/replicated"
+zfs send tank/jails@snap1 | ssh avalok11@192.168.64.2 "zfs receive tank/replicated"
 ```
 
 ## Что почитать

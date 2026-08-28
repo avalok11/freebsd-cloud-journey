@@ -81,13 +81,13 @@
 ```
 Host fbsd-arm
     HostName 192.168.64.10
-    User alexey
+    User avalok11
     IdentityFile ~/.ssh/freebsd_lab
     IdentitiesOnly yes
 
 Host fbsd-1-sel
-    HostName 195.201.xxx.xxx
-    User alexey
+    HostName 178.72.xxx.xxx
+    User avalok11
     IdentityFile ~/.ssh/freebsd_lab
     IdentitiesOnly yes
     # TOTP через Yandex Key
@@ -98,7 +98,7 @@ Host fbsd-1-sel
 ```bash
 ssh fbsd-1-sel
 # вместо
-ssh -i ~/.ssh/freebsd_lab alexey@195.201.xxx.xxx
+ssh -i ~/.ssh/freebsd_lab avalok11@178.72.xxx.xxx
 ```
 
 ## 5. Архитектура подключений
@@ -112,7 +112,7 @@ ssh -i ~/.ssh/freebsd_lab alexey@195.201.xxx.xxx
 
 [UTM локально]
   ├─ fbsd-arm.lab.local (FreeBSD 15.1 arm64)
-  └─ deb-arm.lab.local (Debian 12 arm64)
+  └─ deb-arm.lab.local (Debian 13.6 arm64)
      ↑ подключение с Mac M4 по host-only сети
 
 [Selectel VPS]

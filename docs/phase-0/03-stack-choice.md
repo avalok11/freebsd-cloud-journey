@@ -43,7 +43,7 @@
 # Создать шаблонный jail с nginx
 bastille create nginx 14.3-RELEASE 10.10.10.10
 bastille pkg nginx install -y nginx
-bastille template alexey/bsd-cloud
+bastille template avalok11/bsd-cloud
 
 # Сделать snapshot и развернуть 5 копий за секунды
 bastille stop nginx

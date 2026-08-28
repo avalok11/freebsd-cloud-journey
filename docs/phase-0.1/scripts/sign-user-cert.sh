@@ -1,7 +1,7 @@
 #!/bin/sh
 # Подписать пользовательский публичный ключ.
 # Использование: sign-user-cert.sh <pubkey> <principals> [ttl]
-# Пример: sign-user-cert.sh /tmp/key.pub white,root +8h:00
+# Пример: sign-user-cert.sh /tmp/key.pub avalok11,root +8h:00
 
 set -e
 
@@ -12,7 +12,7 @@ CA_DIR="/usr/local/sshca"
 
 if [ -z "$PUBKEY" ] || [ -z "$PRINCIPALS" ]; then
     echo "Использование: $0 <pubkey> <principals> [ttl]"
-    echo "Пример: $0 /tmp/key.pub white,root +8h:00"
+    echo "Пример: $0 /tmp/key.pub avalok11,root +8h:00"
     exit 1
 fi
 

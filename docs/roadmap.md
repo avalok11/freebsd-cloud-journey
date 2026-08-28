@@ -33,7 +33,7 @@
 | ВМ | Архитектура | Зачем |
 |---|---|---|
 | `fbsd-arm` | FreeBSD 15.1 arm64 | Эксперименты с jails, PF, ZFS, Bastille. То, что можно ломать |
-| `deb-arm` | Debian 12 arm64 | Сравнение с Linux, nftables, отладка |
+| `deb-arm` | Debian 13.6 arm64 | Сравнение с Linux, nftables, отладка |
 | `bastille-dev` | FreeBSD 15.1 arm64 | Отдельная ВМ для разработки Bastille-шаблонов |
 
 **Важно про архитектуру:** локально FreeBSD будет **arm64** (нативно для M4). В Selectel — **amd64** (x86). Большинство настроек идентичны, но есть нюансы:
@@ -50,7 +50,7 @@
 | Фаза | VPS в Selectel | Стоимость ~ |
 |---|---|---|
 | 0–1 | 2× FreeBSD 14.3 (2 CPU, 4 ГБ, 30 ГБ) | 2000–3000 ₽/мес |
-| 2–4 | 3× FreeBSD 14.3 + 1× Debian 12 (2 CPU, 2–4 ГБ) | 4000–6000 ₽/мес |
+| 2–4 | 3× FreeBSD 14.3 + 1× Debian 13.6 (2 CPU, 2–4 ГБ) | 4000–6000 ₽/мес |
 | 5–8 | 3× FreeBSD + 1× Linux + 1× monitoring + 1× Gitea | 7000–9000 ₽/мес |
 
 **Оптимизация:** линейка с почасовой оплатой → останавливать на ночь и в выходные, экономия до 60–70%.
@@ -160,8 +160,8 @@ Mac M4 — **управляющая консоль**, не часть класт
 4. После установки: `freebsd-update fetch && freebsd-update install`. Проверить версию, настроить сеть.
 5. Настроить SSH: `pkg install openssh-portable` (если не установлен), либо использовать встроенный.
 6. На Mac сгенерировать ключ: `ssh-keygen -t ed25519 -f ~/.ssh/freebsd_lab`.
-7. Скопировать ключ на FreeBSD: `ssh-copy-id -i ~/.ssh/freebsd_lab.pub alexey@fbsd-arm.lab.local`.
-8. На FreeBSD создать пользователя `alexey` с группой `wheel` (для sudo). Это делаем во время установки системы.
+7. Скопировать ключ на FreeBSD: `ssh-copy-id -i ~/.ssh/freebsd_lab.pub avalok11@fbsd-arm.lab.local`.
+8. На FreeBSD создать пользователя `avalok11` с группой `wheel` (для sudo). Это делаем во время установки системы.
 9. Добавляем в ~/.shrc настройки подсветки консоли:
 
 Подсветка консоли и листинга ls:
@@ -178,13 +178,13 @@ Mac M4 — **управляющая консоль**, не часть класт
     - Проверить: запустить 10 неудачных попыток входа → IP попадает в таблицу `pfctl -t sshguard -T show`, доступ блокируется.
 12. **TOTP через Yandex Key** (двухфакторка для SSH):
     - `pkg install oath-toolkit` и `pam_google_authenticator` (в FreeBSD это `security/pam_google_authenticator` из портов или пакета).
-    - Под пользователем `alexey` запустить `google-authenticator` → получить QR-код.
+    - Под пользователем `avalok11` запустить `google-authenticator` → получить QR-код.
     - Отсканировать QR-код в Yandex Key.
     - В `/etc/pam.d/sshd` добавить модуль `pam_google_authenticator.so`.
     - В `/etc/ssh/sshd_config` установить `ChallengeResponseAuthentication yes` и `AuthenticationMethods publickey,keyboard-interactive:pam` (ключ + TOTP).
     - Проверить: войти по ключу → TOTP запрашивается.
     - **Важно:** сохранить scratch-коды восстановления в надёжном месте (1Password / бумажка).
-13. Создать ВМ `deb-arm` с Debian 12 arm64: те же параметры. Будет использоваться для Linux-сравнения.
+13. Создать ВМ `deb-arm` с Debian 13.6 arm64: те же параметры. Будет использоваться для Linux-сравнения.
 
 **Шаг 2. Удалённый стенд (Selectel):**
 
@@ -193,9 +193,9 @@ Mac M4 — **управляющая консоль**, не часть класт
 3. Создать первый VPS: `fbsd-1-sel`, 2 CPU, 4 ГБ RAM, 30 ГБ SSD, регион Москва. Публичный IP.
 4. Получить root-пароль в панели (или сгенерировать свой).
 5. Подключиться: `ssh root@<public-ip>`.
-6. Повторить харденинг sshd_config + создать пользователя `alexey` + sudo.
-7. **Скопировать тот же SSH-ключ**, что использовали локально: `ssh-copy-id -i ~/.ssh/freebsd_lab.pub alexey@<public-ip>`.
-8. Проверить подключение: `ssh -i ~/.ssh/freebsd_lab alexey@<public-ip> whoami`.
+6. Повторить харденинг sshd_config + создать пользователя `avalok11` + sudo.
+7. **Скопировать тот же SSH-ключ**, что использовали локально: `ssh-copy-id -i ~/.ssh/freebsd_lab.pub avalok11@<public-ip>`.
+8. Проверить подключение: `ssh -i ~/.ssh/freebsd_lab avalok11@<public-ip> whoami`.
 
 **Шаг 3. Схема архитектуры:**
 
@@ -329,36 +329,26 @@ graph TB
 
 ### Практика
 1. **Создать `fbsd-ca-sel` в Selectel** (1 vCPU, 1 ГБ RAM, 10 ГБ SSD, FreeBSD 15.1 amd64, публичный IP).
-2. Базовый харденинг: sshd_config, sshguard + PF, NTP, TOTP.
+2. Базовый харденинг: sshd_config, sshguard + PF, NTP, TOTP, баннер.
 3. **Структура каталогов** `/usr/local/sshca/` (users/, hosts/, revoked/, scripts/).
 4. Генерация User CA и Host CA в `/usr/local/sshca/`.
-5. Защита приватных ключей: chmod 600, бэкап в 1Password.
-6. Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh` в `/usr/local/sshca/scripts/`.
-7. С Mac M4: подписать `~/.ssh/freebsd_lab.pub`:
-   ```
-   scp ~/.ssh/freebsd_lab.pub fbsd-ca-sel:/tmp/
-   ssh fbsd-ca-sel "/usr/local/sshca/scripts/sign-user-cert.sh /tmp/freebsd_lab.pub white,root +8h:00"
-   scp fbsd-ca-sel:/usr/local/sshca/users/white/freebsd_lab-cert.pub ~/.ssh/
-   ```
-8. На всех FreeBSD-нодах (`fbsd-arm`, `fbsd-1-sel`):
-   - Скопировать `user_ca.pub` в `/etc/ssh/ca/user_ca.pub`.
-   - Скопировать `host_ca.pub` в `/etc/ssh/ca/host_ca.pub`.
-   - В `/etc/ssh/sshd_config` добавить:
-     ```
-     TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
-     HostCertificate /etc/ssh/sshd_host_ed25519_key-cert.pub
-     RevokedKeys /etc/ssh/ca/revoked_keys
-     ```
-   - Подписать host-ключ:
-     ```
-     ssh-keygen -s /usr/local/sshca/host_ca -h -I fbsd-1-sel -V +52w /etc/ssh/sshd_host_ed25519_key.pub
-     ```
-   - Перезапустить sshd.
-9. Проверить: с Mac M4 зайти по сертификату (без указания ключа, ssh сам выберет).
-10. **CRL (список отзыва):** в Фазе 0.1 — ручная демонстрация (одна команда добавляет ключ в CRL). **Автоматизация CRL — в Фазе 4** через Ansible-роль.
+5. **Генерация сервисного ключа `ca_operator`** на `fbsd-ca-sel` (собственный SSH-ключ CA-сервера для доступа к нодам).
+6. **Подписать `ca_operator` сертификатом User CA** с TTL +52w.
+7. Защита приватных ключей: chmod 600, бэкап в 1Password.
+8. Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh`, `distribute-public-keys.sh`, `deploy-crl.sh` в `/usr/local/sshca/scripts/`.
+9. **Настроить `~/.ssh/config` на `fbsd-ca-sel`** для доступа к нодам через ca_operator.
+10. Раскопировать `user_ca.pub` и `host_ca.pub` на ноды (`distribute-public-keys.sh`).
+11. На нодах настроить `TrustedUserCAKeys` + `RevokedKeys` в `sshd_config`.
+12. **Тест 1:** `fbsd-ca-sel` → `fbsd-1-sel` через ca_operator (без TOTP, без ноутбука).
+13. С Mac M4: подписать `~/.ssh/freebsd_lab.pub` (TTL 8h).
+14. **Тест 2:** Mac M4 → `fbsd-1-sel` по сертификату, после удаления ключа из `authorized_keys`.
+15. **Подписать host-ключи** `fbsd-1-sel` и `fbsd-arm` через ca_operator (без ноутбука).
+16. Скопировать host-сертификаты на ноды, добавить `HostCertificate` в `sshd_config`.
+17. **Тест 3:** Mac M4 → `fbsd-1-sel` — `Host key verification failed` НЕ появляется.
+18. CRL (опционально): `revoke-ssh.sh` + `deploy-crl.sh`, проверить отзыв.
 
 ### Тестирование
-- **Сертификат работает:** с Mac M4 зайти по `ssh alexey@fbsd-1-sel` без `-i`, sshd примет по сертификату.
+- **Сертификат работает:** с Mac M4 зайти по `ssh avalok11@fbsd-1-sel` без `-i`, sshd примет по сертификату.
 - **TTL работает:** подписать с TTL 1 минуту, подождать 2 минуты, попробовать зайти — должно отказать.
 - **Host verification работает:** при первом подключении к новой ноде ssh НЕ должен ругаться `Host key verification failed` (хосты подписаны).
 - **Отзыв работает:** подписать ключ, зайти — работает. Добавить в CRL, зайти — должно отказать.
@@ -512,7 +502,7 @@ graph TB
     - Инициализация через `gitea web` + первичная настройка через веб-интерфейс.
     - Создать пользователя-админа, создать репозиторий `infra-configs` (приватный).
     - Настроить systemd-подобный запуск через `bastille service`.
-    - Настроить доступ с Mac M4 по ssh-ключу: `git push git@gitea:alexey/infra-configs.git`.
+    - Настроить доступ с Mac M4 по ssh-ключу: `git push git@gitea:avalok11/infra-configs.git`.
 14. **Два репозитория в работе:** все Ansible-роли и конфиги теперь живут в `infra-configs` (Gitea, приватный). В `freebsd-cloud-journey` (GitHub, публичный) — только описание, отчёты, кейс.
 
 ### Тестирование фазы 4

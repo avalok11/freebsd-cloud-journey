@@ -21,7 +21,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 ├── host_ca                  # приватный ключ Host CA
 ├── host_ca.pub              # публичный ключ Host CA (раскопируется на ноды)
 ├── users/                   # подписанные пользовательские сертификаты
-│   ├── white/
+│   ├── avalok11/
 │   │   ├── freebsd_lab.pub          # оригинальный публичный ключ
 │   │   ├── freebsd_lab-cert.pub     # подписанный сертификат
 │   │   └── history.log              # история подписей (кто, когда, TTL)
@@ -74,7 +74,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 - **User CA** — подписывает пользовательские публичные ключи. Результат — сертификат `id_ed25519-cert.pub` с TTL и principals.
 - **Host CA** — подписывает хостовые ключи серверов. Результат — сертификат `sshd_host_ed25519_key-cert.pub`. Клиенты автоматически доверяют хосту, подписанному CA.
 - **TTL (`-V +8h:00`)** — срок действия. По истечении — сертификат невалиден.
-- **Principals (`-n white,root`)** — какие логины разрешены для этого сертификата. Защита: подписанный ключ от `white` не пустит как `root`, даже если подписан CA.
+- **Principals (`-n avalok11,root`)** — какие логины разрешены для этого сертификата. Защита: подписанный ключ от `avalok11` не пустит как `root`, даже если подписан CA.
 - **CRL (`RevokedKeys`)** — файл с отозванными публичными ключами. Хоть срок действия истёк, в CRL добавляют для раннего отзыва.
 
 ## Практика (план)
@@ -98,8 +98,8 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 7. **Подписать твой ключ** (с Mac M4):
    ```bash
    scp ~/.ssh/freebsd_lab.pub fbsd-ca-sel:/tmp/
-   ssh fbsd-ca-sel "/usr/local/sshca/scripts/sign-user-cert.sh /tmp/freebsd_lab.pub white,root +8h:00"
-   scp fbsd-ca-sel:/usr/local/sshca/users/white/freebsd_lab-cert.pub ~/.ssh/
+   ssh fbsd-ca-sel "/usr/local/sshca/scripts/sign-user-cert.sh /tmp/freebsd_lab.pub avalok11,root +8h:00"
+   scp fbsd-ca-sel:/usr/local/sshca/users/avalok11/freebsd_lab-cert.pub ~/.ssh/
    ```
 8. **Скрипт подписи host-ключей** и подписать `fbsd-1-sel`, `fbsd-arm`.
 9. **Раскопировать публичные ключи CA** на все ноды.
@@ -123,7 +123,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 #!/bin/sh
 # Подписать пользовательский публичный ключ.
 # Использование: sign-user-cert.sh <pubkey> <principals> [ttl]
-# Пример: sign-user-cert.sh /tmp/key.pub white,root +8h:00
+# Пример: sign-user-cert.sh /tmp/key.pub avalok11,root +8h:00
 
 set -e
 
@@ -134,7 +134,7 @@ CA_DIR="/usr/local/sshca"
 
 if [ -z "$PUBKEY" ] || [ -z "$PRINCIPALS" ]; then
     echo "Использование: $0 <pubkey> <principals> [ttl]"
-    echo "Пример: $0 /tmp/key.pub white,root +8h:00"
+    echo "Пример: $0 /tmp/key.pub avalok11,root +8h:00"
     exit 1
 fi
 
@@ -238,7 +238,7 @@ echo "  HostCertificate $PUBKEY-cert.pub"
 #   revoke-ssh.sh user <username> <keyname>
 #   revoke-ssh.sh host <hostname> <keyname>
 # Пример:
-#   revoke-ssh.sh user white freebsd_lab
+#   revoke-ssh.sh user avalok11 freebsd_lab
 #   revoke-ssh.sh host fbsd-1-sel sshd_host_ed25519_key
 
 set -e
@@ -305,14 +305,14 @@ echo "Перезапустите sshd на всех нодах."
 
 ```bash
 # На Mac M4
-scp -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_1_SEL>:/etc/ssh/sshd_host_ed25519_key.pub /tmp/
+scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_1_SEL>:/etc/ssh/sshd_host_ed25519_key.pub /tmp/
 ```
 
 **8.2. Подписать на CA:**
 
 ```bash
 # Скопировать ключ на fbsd-ca-sel
-scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key.pub white@<PUBLIC_IP_FBSD_CA_SEL>:/tmp/
+scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key.pub avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/tmp/
 
 # На fbsd-ca-sel
 sudo /usr/local/sshca/scripts/sign-host-cert.sh /tmp/sshd_host_ed25519_key.pub fbsd-1-sel +52w
@@ -323,10 +323,10 @@ sudo /usr/local/sshca/scripts/sign-host-cert.sh /tmp/sshd_host_ed25519_key.pub f
 
 ```bash
 # На Mac M4
-scp -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/hosts/fbsd-1-sel/sshd_host_ed25519_key-cert.pub /tmp/
+scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/hosts/fbsd-1-sel/sshd_host_ed25519_key-cert.pub /tmp/
 
 # Отправить на fbsd-1-sel
-scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key-cert.pub white@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
+scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key-cert.pub avalok11@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
 ```
 
 **Повторить для `fbsd-arm`** (заменив `fbsd-1-sel` на `fbsd-arm`).
@@ -377,7 +377,7 @@ sudo service sshd status
 
 ```bash
 # На Mac M4
-scp -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/host_ca.pub ~/.ssh/host_ca.pub
+scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/host_ca.pub ~/.ssh/host_ca.pub
 ```
 
 **12.2. Создать `~/.ssh/ca_known_hosts`:**
@@ -504,12 +504,12 @@ sudo chmod +x /usr/local/sshca/scripts/revoke-ssh.sh
 
 ```bash
 # На fbsd-ca-sel
-sudo /usr/local/sshca/scripts/revoke-ssh.sh user white freebsd_lab
+sudo /usr/local/sshca/scripts/revoke-ssh.sh user avalok11 freebsd_lab
 # Ввести passphrase
 
 # Скопировать CRL на ноды
-scp -i ~/.ssh/freebsd_lab /usr/local/sshca/revoked/revoked_keys white@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
-ssh -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_1_SEL> \
+scp -i ~/.ssh/freebsd_lab /usr/local/sshca/revoked/revoked_keys avalok11@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
+ssh -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_1_SEL> \
     "sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
      sudo chmod 644 /etc/ssh/ca/revoked_keys && \
      sudo service sshd restart"
@@ -538,7 +538,7 @@ sudo service sshd restart
 | Подписать с TTL 1 минута, подождать | Через 2 минуты вход отклоняется |
 | `ssh` на новую ноду с подписанным host-ключом | `Host key verification failed` НЕ появляется |
 | Добавить ключ в CRL через `revoke-ssh.sh` | Вход отклоняется даже при валидном сертификате |
-| Войти под `root` ключом, подписанным только для `white` | Должно отказать (principal mismatch) |
+| Войти под `root` ключом, подписанным только для `avalok11` | Должно отказать (principal mismatch) |
 | Проверить `history.log` | Все подписи зафиксированы с датой, principals, TTL |
 
 ## Артефакты (после завершения фазы)

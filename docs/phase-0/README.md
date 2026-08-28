@@ -25,7 +25,7 @@
 ### Удалённый стенд (Selectel)
 
 - [x] Создан VPS `fbsd-1-sel` в Selectel (FreeBSD 15.1 amd64, публичный IP `178.72.xxx.xxx`)
-- [x] Создан пользователь `white` с группой `wheel` + sudo
+- [x] Создан пользователь `avalok11` с группой `wheel` + sudo
 - [x] Настроен SSH по ключу + TOTP через Yandex Key
 - [x] Настроен ntpd
 - [x] Активирован sshguard + PF (как на fbsd-arm, тест блокировки пройден)
