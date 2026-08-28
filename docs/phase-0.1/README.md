@@ -109,6 +109,14 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 
 ## Скрипты
 
+Готовые файлы скриптов лежат в `docs/phase-0.1/scripts/`:
+
+- [`scripts/sign-user-cert.sh`](./scripts/sign-user-cert.sh) — подпись пользовательских ключей.
+- [`scripts/sign-host-cert.sh`](./scripts/sign-host-cert.sh) — подпись host-ключей.
+- [`scripts/revoke-ssh.sh`](./scripts/revoke-ssh.sh) — отзыв ключей.
+
+Ниже — содержимое каждого скрипта для справки.
+
 ### `sign-user-cert.sh`
 
 ```bash
@@ -287,6 +295,239 @@ echo "Ключ отозван."
 echo "Скопируйте $CRL на ноды как /etc/ssh/ca/revoked_keys"
 echo "И добавьте в sshd_config: RevokedKeys /etc/ssh/ca/revoked_keys"
 echo "Перезапустите sshd на всех нодах."
+```
+
+## Дополнительные шаги (host-ключи, ca_known_hosts, revoke-ssh.sh)
+
+### Шаг 8. Подписать host-ключи `fbsd-1-sel` и `fbsd-arm`
+
+**8.1. Скопировать host-ключ с `fbsd-1-sel` на `fbsd-ca-sel` через Mac M4:**
+
+```bash
+# На Mac M4
+scp -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_1_SEL>:/etc/ssh/sshd_host_ed25519_key.pub /tmp/
+```
+
+**8.2. Подписать на CA:**
+
+```bash
+# Скопировать ключ на fbsd-ca-sel
+scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key.pub white@<PUBLIC_IP_FBSD_CA_SEL>:/tmp/
+
+# На fbsd-ca-sel
+sudo /usr/local/sshca/scripts/sign-host-cert.sh /tmp/sshd_host_ed25519_key.pub fbsd-1-sel +52w
+# Ввести passphrase Host CA
+```
+
+**8.3. Скопировать подписанный сертификат на `fbsd-1-sel`:**
+
+```bash
+# На Mac M4
+scp -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/hosts/fbsd-1-sel/sshd_host_ed25519_key-cert.pub /tmp/
+
+# Отправить на fbsd-1-sel
+scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key-cert.pub white@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
+```
+
+**Повторить для `fbsd-arm`** (заменив `fbsd-1-sel` на `fbsd-arm`).
+
+### Шаг 9. Установить host-сертификаты на нодах
+
+**На каждой ноде (`fbsd-1-sel`, `fbsd-arm`):**
+
+```bash
+sudo cp /tmp/sshd_host_ed25519_key-cert.pub /etc/ssh/
+sudo chown root:wheel /etc/ssh/sshd_host_ed25519_key-cert.pub
+sudo chmod 600 /etc/ssh/sshd_host_ed25519_key-cert.pub
+```
+
+### Шаг 10. Настроить `sshd_config` на нодах
+
+**На каждой ноде:**
+
+```bash
+sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup-ca
+sudo ee /etc/ssh/sshd_config
+```
+
+**Добавить в КОНЕЦ файла:**
+
+```
+# SSH Certificate Authority
+TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
+HostCertificate /etc/ssh/sshd_host_ed25519_key-cert.pub
+RevokedKeys /etc/ssh/ca/revoked_keys
+```
+
+**Важно:** `TrustedUserCAKeys` нужен **обязательно** — без него sshd не будет проверять сертификаты. Убедиться, что `user_ca.pub` уже лежит в `/etc/ssh/ca/`.
+
+### Шаг 11. Перезапустить sshd на нодах
+
+```bash
+sudo sshd -t
+sudo service sshd restart
+sudo service sshd status
+```
+
+### Шаг 12. Создать `~/.ssh/ca_known_hosts` на Mac M4
+
+**Цель:** ssh-клиент будет доверять host-сертификатам без запроса `Are you sure you want to continue connecting`.
+
+**12.1. Скопировать `host_ca.pub` на Mac M4:**
+
+```bash
+# На Mac M4
+scp -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/host_ca.pub ~/.ssh/host_ca.pub
+```
+
+**12.2. Создать `~/.ssh/ca_known_hosts`:**
+
+```bash
+touch ~/.ssh/ca_known_hosts
+chmod 600 ~/.ssh/ca_known_hosts
+```
+
+**12.3. Внести запись `@cert-authority`:**
+
+```bash
+# Формат: @cert-authority <pattern> <keytype> <base64-key>
+# pattern — каким хостам доверяем: *, *.example.com, fbsd-*, etc.
+
+# Доверие всем хостам, подписанным нашим Host CA:
+echo "@cert-authority * $(cat ~/.ssh/host_ca.pub)" >> ~/.ssh/ca_known_hosts
+```
+
+**12.4. Проверить:**
+
+```bash
+cat ~/.ssh/ca_known_hosts
+# Должно быть: @cert-authority * ssh-ed25519 AAAAC3Nz...
+```
+
+**12.5. Удалить старые отпечатки из `known_hosts` (для теста):**
+
+```bash
+ssh-keygen -f ~/.ssh/known_hosts -R fbsd-1-sel
+ssh-keygen -f ~/.ssh/known_hosts -R fbsd-arm
+```
+
+**12.6. Проверить вход — `Host key verification` НЕ должен появиться:**
+
+```bash
+ssh -v fbsd-1-sel whoami
+# Ввести TOTP
+# В выводе должно быть: "Server host key: ssh-ed25519 ... (cert valid)"
+# Не должно быть: "Are you sure you want to continue connecting"
+```
+
+### Шаг 13. Создать `revoke-ssh.sh` (если ещё не создан)
+
+Проверить наличие:
+
+```bash
+# На fbsd-ca-sel
+ls -la /usr/local/sshca/scripts/revoke-ssh.sh
+```
+
+Если файла нет — создать по образцу из секции «Скрипты» выше. Содержимое:
+
+```bash
+#!/bin/sh
+# Отозвать пользовательский или хост-ключ.
+# Использование:
+#   revoke-ssh.sh user <username> <keyname>
+#   revoke-ssh.sh host <hostname> <keyname>
+
+set -e
+
+TYPE=$1
+NAME=$2
+KEYNAME=$3
+CA_DIR="/usr/local/sshca"
+
+if [ -z "$TYPE" ] || [ -z "$NAME" ] || [ -z "$KEYNAME" ]; then
+    echo "Использование: $0 {user|host} <name> <keyname>"
+    exit 1
+fi
+
+case "$TYPE" in
+    user)
+        KEY="$CA_DIR/users/$NAME/$KEYNAME.pub"
+        REVOKE_DIR="$CA_DIR/revoked/users/$NAME"
+        ;;
+    host)
+        KEY="$CA_DIR/hosts/$NAME/$KEYNAME.pub"
+        REVOKE_DIR="$CA_DIR/revoked/hosts/$NAME"
+        ;;
+    *)
+        echo "Ошибка: тип должен быть 'user' или 'host'"
+        exit 1
+        ;;
+esac
+
+if [ ! -f "$KEY" ]; then
+    echo "Ошибка: ключ $KEY не найден"
+    exit 1
+fi
+
+mkdir -p "$REVOKE_DIR"
+chmod 700 "$REVOKE_DIR"
+
+cp "$KEY" "$REVOKE_DIR/$KEYNAME.pub"
+chmod 644 "$REVOKE_DIR/$KEYNAME.pub"
+
+CRL="$CA_DIR/revoked/revoked_keys"
+touch "$CRL"
+chmod 644 "$CRL"
+cat "$KEY" >> "$CRL"
+
+LOG_FILE="$CA_DIR/revoked/revocation.log"
+echo "$(date -Iseconds) | $TYPE | $NAME | $KEYNAME" >> "$LOG_FILE"
+
+echo ""
+echo "Ключ отозван."
+echo "Скопируйте $CRL на ноды как /etc/ssh/ca/revoked_keys"
+echo "И добавьте в sshd_config: RevokedKeys /etc/ssh/ca/revoked_keys"
+echo "Перезапустите sshd на всех нодах."
+```
+
+Создать файл:
+
+```bash
+sudo tee /usr/local/sshca/scripts/revoke-ssh.sh > /dev/null << 'EOF'
+# (содержимое выше)
+EOF
+sudo chmod +x /usr/local/sshca/scripts/revoke-ssh.sh
+```
+
+### Шаг 14. Тест отзыва (опционально)
+
+```bash
+# На fbsd-ca-sel
+sudo /usr/local/sshca/scripts/revoke-ssh.sh user white freebsd_lab
+# Ввести passphrase
+
+# Скопировать CRL на ноды
+scp -i ~/.ssh/freebsd_lab /usr/local/sshca/revoked/revoked_keys white@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
+ssh -i ~/.ssh/freebsd_lab white@<PUBLIC_IP_FBSD_1_SEL> \
+    "sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
+     sudo chmod 644 /etc/ssh/ca/revoked_keys && \
+     sudo service sshd restart"
+```
+
+Проверить на Mac M4:
+
+```bash
+ssh fbsd-1-sel whoami
+# Должен отказать: certificate revoked
+```
+
+Откатить:
+
+```bash
+# На fbsd-1-sel
+sudo cp /dev/null /etc/ssh/ca/revoked_keys
+sudo service sshd restart
 ```
 
 ## Тестирование
