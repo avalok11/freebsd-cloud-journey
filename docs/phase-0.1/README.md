@@ -51,21 +51,21 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 
 ## Что сделано
 
-- [ ] Создать `fbsd-ca-sel` в Selectel (1 vCPU, 1 ГБ RAM, 10 ГБ SSD, FreeBSD 15.1 amd64)
-- [ ] Базовый харденинг `fbsd-ca-sel`: sshd_config, sshguard + PF, NTP, TOTP
-- [ ] Создать структуру каталогов `/usr/local/sshca/`
-- [ ] Сгенерировать User CA и Host CA
-- [ ] Приватные ключи CA защищены (chmod 600)
-- [ ] Бэкап CA в 1Password + зашифрованный архив на `fbsd-1-sel`
-- [ ] Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh`
-- [ ] Подписан твой `~/.ssh/freebsd_lab.pub` (TTL 8 часов)
-- [ ] Host-ключи `fbsd-1-sel` и `fbsd-arm` подписаны (TTL 52 недели)
-- [ ] Публичные ключи CA раскопированы на все FreeBSD-ноды
-- [ ] sshd настроен на доверие CA: `TrustedUserCAKeys`, `HostCertificate`
-- [ ] Тест: вход по сертификату с Mac M4 без указания ключа
-- [ ] Тест: TTL истекает — вход отклоняется
-- [ ] CRL (список отзыва) настроен вручную, проверен
-- [ ] **Автоматизация CRL — в Фазе 4** (Ansible-роль)
+- [+] Создать `fbsd-ca-sel` в Selectel (1 vCPU, 1 ГБ RAM, 10 ГБ SSD, FreeBSD 15.1 amd64)
+- [+] Базовый харденинг `fbsd-ca-sel`: sshd_config, sshguard + PF, NTP, TOTP
+- [+] Создать структуру каталогов `/usr/local/sshca/`
+- [+] Сгенерировать User CA и Host CA
+- [+] Приватные ключи CA защищены (chmod 600)
+- [+] Бэкап CA в 1Password + зашифрованный архив на `fbsd-1-sel`
+- [+] Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh`
+- [+] Подписан твой `~/.ssh/freebsd_lab.pub` (TTL 8 часов)
+- [+] Host-ключи `fbsd-1-sel` и `fbsd-arm` подписаны (TTL 52 недели)
+- [+] Публичные ключи CA раскопированы на все FreeBSD-ноды
+- [+] sshd настроен на доверие CA: `TrustedUserCAKeys`, `HostCertificate`
+- [+] Тест: вход по сертификату с Mac M4 без указания ключа
+- [+] Тест: TTL истекает — вход отклоняется
+- [+] CRL (список отзыва) настроен вручную, проверен
+- [+] **Автоматизация CRL — в Фазе 4** (Ansible-роль)
 
 ## Теория
 

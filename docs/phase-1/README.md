@@ -6,13 +6,14 @@
 
 ## Что сделано
 
-- [ ] Настройка сети на fbsd-1-sel (статический IP, gateway, DNS)
-- [ ] Базовая настройка PF на fbsd-1-sel
+- [ ] Поднять `fbsd-2-sel` в Selectel (FreeBSD 15.1 amd64) — нода-реплика для ZFS
+- [ ] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS)
+- [ ] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel
 - [ ] ZFS: создание zpool, датасетов
 - [ ] ZFS: эксперименты со снапшотами, rollback, clone
-- [ ] ZFS send/receive на fbsd-arm
-- [ ] Шифрованный dataset
-- [ ] Сервисный SSH-пользователь `zfs-repl` с `forced-command`
+- [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
+- [ ] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута)
+- [ ] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (комбинируем с Фазой 0.1 CA)
 - [ ] Тест failover репликации
 - [ ] Сравнение с Linux (ext4+LVM, btrfs) на deb-arm
 
@@ -25,12 +26,14 @@
 
 ## Практика
 
-- [ ] Полная настройка сети на FreeBSD
-- [ ] Установка и базовая настройка PF
+- [ ] Поднять `fbsd-2-sel` в Selectel + базовый харденинг (по чек-листу Фазы 0)
+- [ ] Полная настройка сети на FreeBSD (rc.conf, ifconfig, route, resolv.conf)
+- [ ] Установка и базовая настройка PF (ssh in, всё остальное block, NAT для будущих jails)
 - [ ] Создание zpool, датасетов
 - [ ] Снапшоты, clone, rollback
-- [ ] Репликация на удалённую ноду
-- [ ] Сервисный ssh для ZFS replication
+- [ ] Репликация fbsd-1-sel → fbsd-2-sel через ssh
+- [ ] Шифрованный dataset с keyfile (`/etc/zfs/keys/tank-secure.key`, chmod 400)
+- [ ] Сервисный ssh `zfs-repl` с `forced-command` (можно подписывать ключ через `fbsd-ca-sel` из Фазы 0.1)
 
 ## Тестирование
 

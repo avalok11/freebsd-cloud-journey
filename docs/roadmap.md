@@ -49,8 +49,8 @@
 
 | Фаза | VPS в Selectel | Стоимость ~ |
 |---|---|---|
-| 0–1 | 2× FreeBSD 14.3 (2 CPU, 4 ГБ, 30 ГБ) | 2000–3000 ₽/мес |
-| 2–4 | 3× FreeBSD 14.3 + 1× Debian 13.6 (2 CPU, 2–4 ГБ) | 4000–6000 ₽/мес |
+| 0–1 | 3× FreeBSD 15.1: `fbsd-1-sel` (prod), `fbsd-ca-sel` (SSH CA), `fbsd-2-sel` (replica для ZFS) | 2500–3500 ₽/мес |
+| 2–4 | 3× FreeBSD 15.1 + 1× Debian 13.6 (2 CPU, 2–4 ГБ) | 4000–6000 ₽/мес |
 | 5–8 | 3× FreeBSD + 1× Linux + 1× monitoring + 1× Gitea | 7000–9000 ₽/мес |
 
 **Оптимизация:** линейка с почасовой оплатой → останавливать на ночь и в выходные, экономия до 60–70%.
@@ -384,6 +384,10 @@ graph TB
    - Сгенерировать отдельный ed25519-ключ.
    - В `/home/zfs-repl/.ssh/authorized_keys` прописать ограничения: `from="<ip-источника>",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty`.
    - Проверить: с других хостов ключ не принимается, с правильного — работает только `zfs receive`.
+
+**Решения по стенду (фиксирую до старта):**
+- **Третья нода `fbsd-2-sel`** — отдельный VPS в Selectel, FreeBSD 15.1 amd64, тот же тариф что `fbsd-1-sel`. Назначение: **ZFS-реплика** для Фазы 1, позже — вторая нода для CARP/lagg в Фазе 3. Поднимается на первом шаге практики.
+- **Шифрованный dataset — keyfile, не passphrase.** `zfs create -o encryption=aes-256-gcm -o keylocation=file:///etc/zfs/keys/tank-secure.key -o keyformat=raw tank/secure`. Ключ `chmod 400`, владелец `root:wheel`. Это даёт автоподъём после ребута без ручного ввода passphrase — нужно для сервисных данных (`zfs-repl` будет туда писать, и никто не введёт ключ руками).
 
 ### Тестирование фазы 1
 - **Сетевое:** `pfctl -sr` показывает правила, nmap снаружи показывает только ssh, telnet на 80 блокируется.
