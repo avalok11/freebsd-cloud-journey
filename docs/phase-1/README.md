@@ -6,7 +6,17 @@
 
 ## Что сделано
 
-- [ ] Поднять `fbsd-2-sel` в Selectel (FreeBSD 15.1 amd64) — нода-реплика для ZFS
+- [+] Поднять `fbsd-2-sel` в Selectel (FreeBSD 15.1 amd64) — нода-реплика для ZFS
+  - [+] VPS создан (1 vCPU, 1 ГБ RAM, 10 ГБ SSD)
+  - [+] Пользователь `avalok11` + sudo
+  - [+] sshd_config: PermitRootLogin no, PasswordAuthentication no, TOTP
+  - [+] sshguard + PF активированы
+  - [+] ntpd синхронизирован
+  - [+] Host-ключ подписан через `fbsd-ca-sel` (TTL 52w)
+  - [+] Вход по сертификату с Mac M4 работает (host-проверка)
+  - [+] Строка с IP `fbsd-2-sel` в `architecture.md` (внутренний `172.16.0.4`, без публичного IP)
+  - [ ] Баннер — **не доделан**
+  - [ ] `user_ca.pub` скопирован на `fbsd-2-sel` + `TrustedUserCAKeys` в `sshd_config` + рестарт sshd — **не доделан** (без этого вход под `avalok11` по сертификату не работает)
 - [ ] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS)
 - [ ] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel
 - [ ] ZFS: создание zpool, датасетов
