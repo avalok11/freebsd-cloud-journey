@@ -6,9 +6,9 @@
 
 ```mermaid
 graph TB
-    subgraph Laptop[Mac M4 — рабочая станция админа]
-        Console[Ansible-консоль<br/>ssh-keys + сертификаты<br/>~/.ssh/freebsd_lab + zfs_repl]
-        GH[freebsd-cloud-journey<br/>GitHub, публичный<br/>github.com/avalok11/...]
+    subgraph Laptop["Mac M4 — рабочая станция админа"]
+        Console["Ansible-консоль<br/>ssh-keys + сертификаты<br/>~/.ssh/freebsd_lab + zfs_repl"]
+        GH["freebsd-cloud-journey<br/>GitHub, публичный<br/>github.com/avalok11/..."]
     end
 
     subgraph Selectel["Selectel VPS, регион Москва (≤10 000 ₽/мес)"]
@@ -25,21 +25,21 @@ graph TB
         DARM["<b>deb-arm</b><br/>Debian 13.6 arm64<br/>192.168.64.4<br/>сравнение"]
     end
 
-    Console -->|ssh + TOTP<br/>+ сертификат CA| F1
-    Console -->|ssh + сертификат| CA
-    Console -->|ssh -J fbsd-1-sel<br/>+ сертификат| F2
-    Console -->|ssh по ключу| FARM
-    Console -->|ssh по ключу| DARM
-    Console -->|git push| GH
-    CA -.подписывает user-ключи.-> Console
-    CA -.подписывает user-ключи<br/>zfs-repl TTL 52w.-> Console
-    CA -.подписывает host-ключи.-> F1
-    CA -.подписывает host-ключи.-> F2
-    CA -.подписывает host-ключи.-> FARM
-    F1 -.ZFS replication<br/>по 172.16.0.0/16.-> F2
-    F1 -.будет CARP.-> F2
-    F2 -.ZFS replication.-> F3
-    Gitea -.хранит.-> InfraCfg[infra-configs<br/>приватный репо]
+    Console -->|"ssh + TOTP + сертификат CA"| F1
+    Console -->|"ssh + сертификат"| CA
+    Console -->|"ssh -J fbsd-1-sel + сертификат"| F2
+    Console -->|"ssh по ключу"| FARM
+    Console -->|"ssh по ключу"| DARM
+    Console -->|"git push"| GH
+    CA -. "подписывает user-ключи" .-> Console
+    CA -. "подписывает user-ключи (zfs-repl TTL 52w)" .-> Console
+    CA -. "подписывает host-ключи" .-> F1
+    CA -. "подписывает host-ключи" .-> F2
+    CA -. "подписывает host-ключи" .-> FARM
+    F1 -. "ZFS replication по 172.16.0.0/16" .-> F2
+    F1 -. "будет CARP" .-> F2
+    F2 -. "ZFS replication" .-> F3
+    Gitea -. "хранит" .-> InfraCfg["infra-configs<br/>приватный репо"]
 ```
 
 ## Принципы
@@ -81,7 +81,7 @@ graph TB
 | **Storage** (планируется) | ZFS-репликация | `10.10.1.0/24` |
 | **Bastille VNET** (планируется) | Сеть для jail-ов | `10.10.10.0/24` |
 
-## Безопасность на FreeBSD-нодах (fbsd-1-sel, fbsd-ca-sel, fbsd-2-sel, fbsd-arm)
+## Безопасность на FreeBSD-нодах (fbsd-1-sel, fbsd-ca-sel, fbsd-arm)
 
 - ✅ SSH по ключу (ed25519, `~/.ssh/freebsd_lab` на Mac M4).
 - ✅ TOTP через Yandex Key (`pam_google_authenticator`).
@@ -91,16 +91,26 @@ graph TB
 - ✅ ntpd для синхронизации времени.
 - ✅ NTP-сервер time.cloudflare.com.
 - ✅ **SSH CA (Фаза 0.1 закрыта):** User CA + Host CA на `fbsd-ca-sel`. Host-ключи `fbsd-1-sel`, `fbsd-2-sel`, `fbsd-arm` подписаны (TTL 52w). Пользовательский ключ `freebsd_lab` подписан (TTL 8h, переподпись). CRL настроен вручную, проверен. **Автоматизация CRL — Фаза 4** (Ansible).
-- ⏳ Баннер на `fbsd-2-sel` (День 1 Фазы 1, не доделан).
-- ⏳ User CA → TrustedUserCAKeys на `fbsd-2-sel` (День 1 Фазы 1, не доделан — без этого вход под `avalok11` по сертификату не работает, только host-верификация).
+
+## Безопасность на `fbsd-2-sel` (jump-only, без TOTP)
+
+- ✅ SSH по сертификату (User CA + Host CA).
+- ✅ `PasswordAuthentication no`, `PermitRootLogin no`.
+- ✅ AuthenticationMethods: `publickey` (без `keyboard-interactive`).
+- ✅ sshguard + PF.
+- ✅ ntpd синхронизирован.
+- ⏳ Баннер — **не доделан** (косметика, не блокер).
+- ⏳ `user_ca.pub` скопирован на `fbsd-2-sel` + `TrustedUserCAKeys` в `sshd_config` + рестарт sshd — **не доделан** (без этого вход под `avalok11` по сертификату не работает, только host-верификация).
+
+**Почему без TOTP:** `fbsd-2-sel` не имеет публичного IP, зайти можно только через `fbsd-1-sel` (jump-host), на котором TOTP уже стоит. Двойной TOTP на цепочке — избыточен и замедляет работу. Единственная защита ноды — пара ed25519-ключ + сертификат CA с TTL 8h, что сознательно принято как tradeoff (см. «Ключевые решения» в `docs/phase-1/README.md`).
 
 ## Что нужно донастроить (задачи)
 
 - [x] Активировать sshguard + PF на fbsd-1-sel (как на fbsd-arm).
 - [x] Создать `fbsd-2-sel` (для реплики в Фазе 1 и HA-тестов в Фазе 3).
-- [ ] Доделать User CA-доверие на fbsd-2-sel: `TrustedUserCAKeys /etc/ssh/ca/user_ca.pub` в `sshd_config` + рестарт sshd.
-- [ ] Баннер на fbsd-2-sel.
-- [ ] Скопировать `host_ca.pub` на Mac M4 (уже должен быть с Фазы 0.1, но перепроверить после подписи fbsd-2-sel).
+- [x] TOTP на fbsd-2-sel снят (jump-only, single factor: cert + key).
+- [x] User CA → `TrustedUserCAKeys` на fbsd-2-sel, рестарт sshd, вход под `avalok11` по сертификату работает.
+- [ ] Баннер на fbsd-2-sel (косметика).
 
 ## Хранилище (ZFS-пулы) — в работе
 
@@ -124,6 +134,7 @@ graph TB
 
 ## История изменений
 
+- **2026-09-06 (v3.1, День 1 Фазы 1, продолжение)** — на `fbsd-2-sel` снят TOTP (jump-only, single factor: ed25519 + сертификат). `user_ca.pub` скопирован на ноду, `TrustedUserCAKeys` — в работе. Причина: `fbsd-2-sel` без публичного IP, единственный путь входа — через `fbsd-1-sel` (где TOTP уже стоит), двойной TOTP на цепочке избыточен.
 - **2026-08-30 (v3, День 1 Фазы 1)** — поднят `fbsd-2-sel` в Selectel (FreeBSD 15.1 amd64, только приватный IP `172.16.0.4`, jump-host через `fbsd-1-sel`). Базовый харденинг + sshguard + TOTP + ntpd выполнены. Host-ключ подписан через `fbsd-ca-sel` (TTL 52w). Баннер и User CA-доверие (`TrustedUserCAKeys`) — в работе. Решение: `fbsd-2-sel` остаётся без публичного IP, межсервисный трафик идёт по `172.16.0.0/16`.
 - **2026-08-28 (v2.3, Фаза 0.1 закрыта)** — User CA + Host CA на `fbsd-ca-sel`, подписаны host-ключи `fbsd-1-sel` и `fbsd-arm`, CRL настроен, TTL-тест пройден.
 - **2026-08-11 (v2.1)** — на fbsd-1-sel активирован sshguard + PF, статус синхронизирован с fbsd-arm.

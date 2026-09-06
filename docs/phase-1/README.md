@@ -9,14 +9,15 @@
 - [+] Поднять `fbsd-2-sel` в Selectel (FreeBSD 15.1 amd64) — нода-реплика для ZFS
   - [+] VPS создан (1 vCPU, 1 ГБ RAM, 10 ГБ SSD)
   - [+] Пользователь `avalok11` + sudo
-  - [+] sshd_config: PermitRootLogin no, PasswordAuthentication no, TOTP
+  - [+] sshd_config: PermitRootLogin no, PasswordAuthentication no
   - [+] sshguard + PF активированы
   - [+] ntpd синхронизирован
   - [+] Host-ключ подписан через `fbsd-ca-sel` (TTL 52w)
-  - [+] Вход по сертификату с Mac M4 работает (host-проверка)
+  - [+] `user_ca.pub` скопирован на `fbsd-2-sel` + `TrustedUserCAKeys` в `sshd_config` (user-cert вход работает)
+  - [+] Вход по сертификату с Mac M4 работает (host + user проверка)
   - [+] Строка с IP `fbsd-2-sel` в `architecture.md` (внутренний `172.16.0.4`, без публичного IP)
-  - [ ] Баннер — **не доделан**
-  - [ ] `user_ca.pub` скопирован на `fbsd-2-sel` + `TrustedUserCAKeys` в `sshd_config` + рестарт sshd — **не доделан** (без этого вход под `avalok11` по сертификату не работает)
+  - [+] **TOTP снят** — jump-only нода, единственный путь входа через `fbsd-1-sel` (где TOTP уже стоит), двойной TOTP на цепочке избыточен
+  - [ ] Баннер — **не доделан** (косметика)
 - [ ] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS)
 - [ ] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel
 - [ ] ZFS: создание zpool, датасетов
@@ -144,7 +145,10 @@
 
 ## Ключевые решения
 
-(заполнять по ходу)
+- **2026-09-06 — fbsd-2-sel: TOTP снят, single-factor (ed25519 + сертификат).** У ноды нет публичного IP, единственный путь входа — через `fbsd-1-sel` (jump-host), на котором TOTP уже стоит. Двойной TOTP на цепочке избыточен. Защита ноды — пара ed25519-ключ + сертификат CA с TTL 8h. Tradeoff сознательный: компрометация ключа на ноуте = вход на fbsd-2-sel, но без TOTP-приложения. Если позже захочется жёстче — добавим `from="172.16.0.2"` в `authorized_keys` (только с jump-host'а).
+- **2026-08-30 — fbsd-2-sel: только приватный IP, jump-host через fbsd-1-sel.** Экономит ~150–200 ₽/мес на публичном IP, ZFS-реплика и сервисный SSH идут по `172.16.0.0/16` (быстрее, без публичного egress). Минус: в случае падения fbsd-1-sel нужно лезть в панель Selectel, чтобы попасть на fbsd-2-sel напрямую — для Фазы 1 приемлемо, в Фазе 3 (CARP) — будет решена через VIP.
+- **2026-08-30 — шифрованный dataset: keyfile, не passphrase.** `zfs create -o encryption=aes-256-gcm -o keylocation=file:///etc/zfs/keys/tank-secure.key -o keyformat=raw tank/secure`. Keyfile `chmod 400`, владелец `root:wheel`. Даёт автоподъём после ребута без ручного ввода passphrase — нужно для сервисных данных (`zfs-repl` будет туда писать). Passphrase-вариант отвергнут: некому вводить ключ после ребута ноды в Selectel.
+- **2026-08-30 — сервисный ключ zfs_repl: TTL 52w (не 8h как у обычного freebsd_lab).** Сервисные репликации должны идти по расписанию без ручной переподписи каждые 8 часов. Бонус: ключ подписывается через `fbsd-ca-sel` (Фаза 0.1) — единый процесс с пользовательскими ключами, revoke через тот же CRL.
 
 ## Грабли и открытия
 
