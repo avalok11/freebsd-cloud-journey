@@ -19,7 +19,8 @@
   - [+] **TOTP снят** — jump-only нода, единственный путь входа через `fbsd-1-sel` (где TOTP уже стоит), двойной TOTP на цепочке избыточен
   - [+] Баннер — доделан (косметика)
 - [+] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS) — задокументировано в разделе «Сеть» ниже
-- [ ] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel
+- [+] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel (v1 с Фазы 0) + v2: antispoof, NAT-заглушка под jails
+- [ ] Применить `pf-ruleset.conf` v2 на обе ноды (`pfctl -nf` → `pfctl -f`)
 - [ ] ZFS: создание zpool, датасетов
 - [ ] ZFS: эксперименты со снапшотами, rollback, clone
 - [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
@@ -149,6 +150,7 @@
 - **2026-08-30 — fbsd-2-sel: только приватный IP, jump-host через fbsd-1-sel.** Экономит ~150–200 ₽/мес на публичном IP, ZFS-реплика и сервисный SSH идут по `172.16.0.0/16` (быстрее, без публичного egress). Минус: в случае падения fbsd-1-sel нужно лезть в панель Selectel, чтобы попасть на fbsd-2-sel напрямую — для Фазы 1 приемлемо, в Фазе 3 (CARP) — будет решена через VIP.
 - **2026-08-30 — шифрованный dataset: keyfile, не passphrase.** `zfs create -o encryption=aes-256-gcm -o keylocation=file:///etc/zfs/keys/tank-secure.key -o keyformat=raw tank/secure`. Keyfile `chmod 400`, владелец `root:wheel`. Даёт автоподъём после ребута без ручного ввода passphrase — нужно для сервисных данных (`zfs-repl` будет туда писать). Passphrase-вариант отвергнут: некому вводить ключ после ребута ноды в Selectel.
 - **2026-08-30 — сервисный ключ zfs_repl: TTL 52w (не 8h как у обычного freebsd_lab).** Сервисные репликации должны идти по расписанию без ручной переподписи каждые 8 часов. Бонус: ключ подписывается через `fbsd-ca-sel` (Фаза 0.1) — единый процесс с пользовательскими ключами, revoke через тот же CRL.
+- **2026-09-06 — PF ruleset одинаковый на обеих нодах (v2).** Единый файл `docs/phase-1/pf-ruleset.conf` в репо, раскладывается одинаково на fbsd-1-sel и fbsd-2-sel. Преимущество: рассинхрона нет, в Фазе 4 Ansible просто `copy: src=pf-ruleset.conf dest=/etc/pf.conf`. Изменения в v1→v2: добавлен `antispoof` (обязательная гигиена, в v1 отсутствовал), `set block-policy return` (RST на закрытые порты — косметика, не безопасность), закомментированный NAT-блок под jails (Фаза 2), закомментированный rate-limit на ssh (уже есть sshguard).
 
 ## Сеть
 
@@ -224,7 +226,7 @@ default            172.16.0.1         UGS         vtnet0
 ## Артефакты
 
 - [phase-1-zfs-report.md](./phase-1-zfs-report.md) — отчёт о результатах ZFS-тестов
-- [pf-ruleset.conf](./pf-ruleset.conf) — базовый набор правил PF с комментариями
+- [pf-ruleset.conf](./pf-ruleset.conf) — **v2, актуальный**, единый ruleset для обеих нод
 - [zfs-replication.sh](./zfs-replication.sh) — скрипт репликации
 - [service-ssh-setup.md](./service-ssh-setup.md) — документация по сервисной SSH-учётке
 
