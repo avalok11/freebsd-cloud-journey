@@ -17,8 +17,8 @@
   - [+] Вход по сертификату с Mac M4 работает (host + user проверка)
   - [+] Строка с IP `fbsd-2-sel` в `architecture.md` (внутренний `172.16.0.4`, без публичного IP)
   - [+] **TOTP снят** — jump-only нода, единственный путь входа через `fbsd-1-sel` (где TOTP уже стоит), двойной TOTP на цепочке избыточен
-  - [ ] Баннер — **не доделан** (косметика)
-- [ ] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS)
+  - [+] Баннер — доделан (косметика)
+- [+] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS) — задокументировано в разделе «Сеть» ниже
 - [ ] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel
 - [ ] ZFS: создание zpool, датасетов
 - [ ] ZFS: эксперименты со снапшотами, rollback, clone
@@ -150,9 +150,72 @@
 - **2026-08-30 — шифрованный dataset: keyfile, не passphrase.** `zfs create -o encryption=aes-256-gcm -o keylocation=file:///etc/zfs/keys/tank-secure.key -o keyformat=raw tank/secure`. Keyfile `chmod 400`, владелец `root:wheel`. Даёт автоподъём после ребута без ручного ввода passphrase — нужно для сервисных данных (`zfs-repl` будет туда писать). Passphrase-вариант отвергнут: некому вводить ключ после ребута ноды в Selectel.
 - **2026-08-30 — сервисный ключ zfs_repl: TTL 52w (не 8h как у обычного freebsd_lab).** Сервисные репликации должны идти по расписанию без ручной переподписи каждые 8 часов. Бонус: ключ подписывается через `fbsd-ca-sel` (Фаза 0.1) — единый процесс с пользовательскими ключами, revoke через тот же CRL.
 
+## Сеть
+
+Зафиксированное состояние на 2026-09-06. Снято с обеих нод командами `cat /etc/rc.conf | grep -E '...'`, `cat /etc/resolv.conf`, `ifconfig vtnet0`, `netstat -rn`. Совпадает с тем, что в `docs/architecture.md` (Принцип #6: межсервисный трафик — по `172.16.0.0/16`).
+
+### Сводная таблица
+
+| Параметр | `fbsd-1-sel` | `fbsd-2-sel` |
+|---|---|---|
+| Hostname | `fbsd-1-sel.lab.sel` | `fbsd-2-sel.lab.sel` |
+| Внутренний IP | `172.16.0.2/16` (vtnet0) | `172.16.0.4/16` (vtnet0) |
+| Публичный IP | `178.72.xxx.xxx` | **нет** (jump-only) |
+| Gateway | `172.16.0.1` | `172.16.0.1` |
+| MAC | `fa:16:3e:31:fe:bd` | `fa:16:3e:b6:60:00` |
+| MTU | 1500 | 1500 |
+| Link | 10Gbase-T full-duplex | 10Gbase-T full-duplex |
+| IPv6 | SLAAC (`accept_rtadv`), `fe80::f816:3eff:fe31:febd` | **отключён** (`IFDISABLED` в nd6) |
+| Search domain | `lab.sel` | `lab.local` |
+| DNS | 8.8.8.8, 1.1.1.1, 77.88.8.8, 77.88.8.1 | 8.8.8.8, 77.88.8.8 |
+| Вход с Mac M4 | напрямую | через `ssh -J fbsd-1-sel` |
+
+### `/etc/rc.conf` (только сетевые строки)
+
+**`fbsd-1-sel`:**
+```
+hostname="fbsd-1-sel.lab.sel"
+ifconfig_vtnet0="inet 172.16.0.2/16"
+defaultrouter="172.16.0.1"
+ifconfig_vtnet0_ipv6="inet6 accept_rtadv"
+```
+
+**`fbsd-2-sel`:**
+```
+hostname="fbsd-2-sel.lab.sel"
+ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"
+defaultrouter="172.16.0.1"
+```
+
+> **Нюанс синтаксиса FreeBSD:** на `fbsd-1-sel` используется CIDR-нотация (`172.16.0.2/16`), на `fbsd-2-sel` — `inet + netmask`. Оба варианта валидны (`man rc.conf` → `ifconfig_<if>`), но непоследовательны — задокументировано в «Грабли» ниже. К единому виду приведём в День 3 (PF), когда будем править `rc.conf` под `pf`-загрузку.
+
+### Маршрутизация (`netstat -rn`)
+
+Обе ноды идут через один gateway Selectel — `172.16.0.1`. Это означает, что Selectel даёт обоим VPS один L2-сегмент внутри ДЦ, и пакеты между `172.16.0.2` и `172.16.0.4` ходят **минуя публичный IP**, по приватной сети. ZFS-реплика в День 2 Недели 3 пойдёт по этому маршруту, без выхода в интернет.
+
+Дефолтный маршрут — одинаковый на обеих нодах:
+```
+default            172.16.0.1         UGS         vtnet0
+172.16.0.0/16      link#1             U           vtnet0
+```
+
+### Сравнение с Linux (для брифа `01-network-stack.md`)
+
+| Действие | FreeBSD | Linux (deb-arm) |
+|---|---|---|
+| Посмотреть IP | `ifconfig vtnet0` | `ip addr show` |
+| Таблица маршрутов | `netstat -rn` | `ip route` |
+| Routing socket-статистика | `netstat -s` | `ip -s link` |
+| DNS | `/etc/resolv.conf` | `/etc/resolv.conf` (идентично) |
+| Статический IP | `/etc/rc.conf` (`ifconfig_vtnet0=...`) | `/etc/network/interfaces` или Netplan YAML |
+| IPv6 SLAAC | `ifconfig_vtnet0_ipv6="inet6 accept_rtadv"` | `ipv6 ra_accept=1` (sysctl) или Netplan |
+
+Самый заметный для меня как пришедшего из Linux — **отсутствие NetworkManager и netplan**. Вся сеть в одном `/etc/rc.conf`, после правки — `service netif restart` (или ребут). На маленьком стенде это плюс (прозрачно), в большом кластере с 20+ VLAN — минус (придётся писать свой шаблонизатор под `rc.conf`, отсюда в Фазе 4 — Ansible).
+
 ## Грабли и открытия
 
-(заполнять по ходу)
+- **2026-09-06 — search domain разный: `lab.sel` vs `lab.local`.** На `fbsd-1-sel` стоит `search lab.sel` (по умолчанию из панели Selectel при создании VPS), на `fbsd-2-sel` я (или шаблон Selectel) задал `search lab.local`. Технической проблемы нет, но выглядит как «две ноды в разных доменах». Решение: унифицировать на `lab.sel` (соответствует `*.lab.sel` hostname'ам) в День 3, когда будем править `rc.conf` под `pf` — заодно.
+- **2026-09-06 — синтаксис IP в `rc.conf` непоследовательный.** `ifconfig_vtnet0="inet 172.16.0.2/16"` (CIDR) vs `ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"` (маска). Оба работают, оба задокументированы в `man rc.conf`. Привести к CIDR на `fbsd-2-sel` в День 3.
 
 ## Метрики
 
