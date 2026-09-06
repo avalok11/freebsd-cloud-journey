@@ -19,8 +19,10 @@
   - [+] **TOTP снят** — jump-only нода, единственный путь входа через `fbsd-1-sel` (где TOTP уже стоит), двойной TOTP на цепочке избыточен
   - [+] Баннер — доделан (косметика)
 - [+] Настройка сети на fbsd-1-sel и fbsd-2-sel (статический IP, gateway, DNS) — задокументировано в разделе «Сеть» ниже
+- [+] Унификация сетевых настроек на `fbsd-2-sel` под `fbsd-1-sel`: search domain → `lab.sel`, IP в CIDR-нотации, DNS как у fbsd-1-sel
 - [+] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel (v1 с Фазы 0) + v2: antispoof, NAT-заглушка под jails
-- [ ] Применить `pf-ruleset.conf` v2 на обе ноды (`pfctl -nf` → `pfctl -f`)
+- [+] Применить `pf-ruleset.conf` v2 на обе ноды (`pfctl -nf` → `pfctl -f`)
+- [+] Зафиксировано поведение Selectel edge (SYN/ACK на любой порт) в «Грабли»
 - [ ] ZFS: создание zpool, датасетов
 - [ ] ZFS: эксперименты со снапшотами, rollback, clone
 - [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
@@ -151,6 +153,7 @@
 - **2026-08-30 — шифрованный dataset: keyfile, не passphrase.** `zfs create -o encryption=aes-256-gcm -o keylocation=file:///etc/zfs/keys/tank-secure.key -o keyformat=raw tank/secure`. Keyfile `chmod 400`, владелец `root:wheel`. Даёт автоподъём после ребута без ручного ввода passphrase — нужно для сервисных данных (`zfs-repl` будет туда писать). Passphrase-вариант отвергнут: некому вводить ключ после ребута ноды в Selectel.
 - **2026-08-30 — сервисный ключ zfs_repl: TTL 52w (не 8h как у обычного freebsd_lab).** Сервисные репликации должны идти по расписанию без ручной переподписи каждые 8 часов. Бонус: ключ подписывается через `fbsd-ca-sel` (Фаза 0.1) — единый процесс с пользовательскими ключами, revoke через тот же CRL.
 - **2026-09-06 — PF ruleset одинаковый на обеих нодах (v2).** Единый файл `docs/phase-1/pf-ruleset.conf` в репо, раскладывается одинаково на fbsd-1-sel и fbsd-2-sel. Преимущество: рассинхрона нет, в Фазе 4 Ansible просто `copy: src=pf-ruleset.conf dest=/etc/pf.conf`. Изменения в v1→v2: добавлен `antispoof` (обязательная гигиена, в v1 отсутствовал), `set block-policy return` (RST на закрытые порты — косметика, не безопасность), закомментированный NAT-блок под jails (Фаза 2), закомментированный rate-limit на ssh (уже есть sshguard).
+- **2026-09-06 — сетевые настройки унифицированы на обеих нодах.** На `fbsd-2-sel` приведено к виду `fbsd-1-sel`: `search lab.sel`, CIDR-нотация в `ifconfig_vtnet0` (`172.16.0.4/16` вместо `172.16.0.4 netmask 255.255.0.0`), DNS-список расширен до 4 серверов (Google + Cloudflare + Yandex). Преимущество: при росте до N нод (Фаза 2–3) одна и та же Ansible-роль раскладывает `/etc/rc.conf` без условий. Заодно убрали лёгкий dean-on: на `fbsd-2-sel` был `search lab.local` — выглядело как «другая организация».
 
 ## Сеть
 
@@ -168,8 +171,8 @@
 | MTU | 1500 | 1500 |
 | Link | 10Gbase-T full-duplex | 10Gbase-T full-duplex |
 | IPv6 | SLAAC (`accept_rtadv`), `fe80::f816:3eff:fe31:febd` | **отключён** (`IFDISABLED` в nd6) |
-| Search domain | `lab.sel` | `lab.local` |
-| DNS | 8.8.8.8, 1.1.1.1, 77.88.8.8, 77.88.8.1 | 8.8.8.8, 77.88.8.8 |
+| Search domain | `lab.sel` | `lab.sel` (унифицировано 2026-09-06) |
+| DNS | 8.8.8.8, 1.1.1.1, 77.88.8.8, 77.88.8.1 | 8.8.8.8, 1.1.1.1, 77.88.8.8, 77.88.8.1 (унифицировано) |
 | Вход с Mac M4 | напрямую | через `ssh -J fbsd-1-sel` |
 
 ### `/etc/rc.conf` (только сетевые строки)
@@ -185,11 +188,11 @@ ifconfig_vtnet0_ipv6="inet6 accept_rtadv"
 **`fbsd-2-sel`:**
 ```
 hostname="fbsd-2-sel.lab.sel"
-ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"
+ifconfig_vtnet0="inet 172.16.0.4/16"
 defaultrouter="172.16.0.1"
 ```
 
-> **Нюанс синтаксиса FreeBSD:** на `fbsd-1-sel` используется CIDR-нотация (`172.16.0.2/16`), на `fbsd-2-sel` — `inet + netmask`. Оба варианта валидны (`man rc.conf` → `ifconfig_<if>`), но непоследовательны — задокументировано в «Грабли» ниже. К единому виду приведём в День 3 (PF), когда будем править `rc.conf` под `pf`-загрузку.
+> **Унифицировано 2026-09-06:** обе ноды теперь используют CIDR-нотацию (`ifconfig_vtnet0="inet .../16"`) и одинаковый search domain `lab.sel`. DNS-список тоже приведён к `fbsd-1-sel` (4 сервера: Google + Cloudflare + Yandex). См. «Ключевые решения» → 2026-09-06.
 
 ### Маршрутизация (`netstat -rn`)
 
@@ -216,8 +219,9 @@ default            172.16.0.1         UGS         vtnet0
 
 ## Грабли и открытия
 
-- **2026-09-06 — search domain разный: `lab.sel` vs `lab.local`.** На `fbsd-1-sel` стоит `search lab.sel` (по умолчанию из панели Selectel при создании VPS), на `fbsd-2-sel` я (или шаблон Selectel) задал `search lab.local`. Технической проблемы нет, но выглядит как «две ноды в разных доменах». Решение: унифицировать на `lab.sel` (соответствует `*.lab.sel` hostname'ам) в День 3, когда будем править `rc.conf` под `pf` — заодно.
-- **2026-09-06 — синтаксис IP в `rc.conf` непоследовательный.** `ifconfig_vtnet0="inet 172.16.0.2/16"` (CIDR) vs `ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"` (маска). Оба работают, оба задокументированы в `man rc.conf`. Привести к CIDR на `fbsd-2-sel` в День 3.
+- **2026-09-06 — search domain разный: `lab.sel` vs `lab.local`.** ~~На `fbsd-1-sel` стоит `search lab.sel` (по умолчанию из панели Selectel при создании VPS), на `fbsd-2-sel` я (или шаблон Selectel) задал `search lab.local`. Технической проблемы нет, но выглядит как «две ноды в разных доменах». Решение: унифицировать на `lab.sel` (соответствует `*.lab.sel` hostname'ам) в День 3, когда будем править `rc.conf` под `pf` — заодно.~~ **Решено 2026-09-06:** на `fbsd-2-sel` поставлен `search lab.sel`, DNS-список расширен до 4 серверов (как у `fbsd-1-sel`).
+- **2026-09-06 — синтаксис IP в `rc.conf` непоследовательный.** ~~`ifconfig_vtnet0="inet 172.16.0.2/16"` (CIDR) vs `ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"` (маска). Оба работают, оба задокументированы в `man rc.conf`. Привести к CIDR на `fbsd-2-sel` в День 3.~~ **Решено 2026-09-06:** на `fbsd-2-sel` переведено на CIDR-нотацию (`ifconfig_vtnet0="inet 172.16.0.4/16"`), теперь `rc.conf` обеих нод синтаксически идентичен.
+- **2026-09-06 — Selectel edge отвечает SYN/ACK на любой порт публичного IP (anti-scan / port knocking).** При `nmap -Pn -p 1-1024 178.72.xxx.xxx` показывает 1024 open порта, хотя реально на ноде открыт только 22/tcp. Подтверждается тем, что `telnet 21` подключается, но `pfctl -ss` показывает только ssh/ntp-коннекты, ftp-демон не установлен, в `services` ничего сверх sshd не запущено. **Реальный state проверять через приватный IP** (`ssh -J fbsd-1-sel ... nmap -sS 172.16.0.2`) или `nmap -sA` (ACK-сканирование, показывает filtered/unfiltered вместо open). В Selectel-документации это «защита от сканирования». В проде, если захочется реальный nmap снаружи, можно попросить Selectel отключить (обычно платная опция) — для нашего кейса не блокер.
 
 ## Метрики
 
