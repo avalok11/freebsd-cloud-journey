@@ -23,7 +23,7 @@
 - [+] Базовая настройка PF на fbsd-1-sel и fbsd-2-sel (v1 с Фазы 0) + v2: antispoof, NAT-заглушка под jails
 - [+] Применить `pf-ruleset.conf` v2 на обе ноды (`pfctl -nf` → `pfctl -f`)
 - [+] Зафиксировано поведение Selectel edge (SYN/ACK на любой порт) в «Грабли»
-- [ ] ZFS: создание zpool, датасетов
+- [+] ZFS: создание zpool, датасетов (на fbsd-1-sel: `zroot/tank` как дочерний dataset, иерархия `data/logs/repl/secure`, см. `phase-1-zfs-report.md`)
 - [ ] ZFS: эксперименты со снапшотами, rollback, clone
 - [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
 - [ ] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута)
@@ -154,6 +154,7 @@
 - **2026-08-30 — сервисный ключ zfs_repl: TTL 52w (не 8h как у обычного freebsd_lab).** Сервисные репликации должны идти по расписанию без ручной переподписи каждые 8 часов. Бонус: ключ подписывается через `fbsd-ca-sel` (Фаза 0.1) — единый процесс с пользовательскими ключами, revoke через тот же CRL.
 - **2026-09-06 — PF ruleset одинаковый на обеих нодах (v2).** Единый файл `docs/phase-1/pf-ruleset.conf` в репо, раскладывается одинаково на fbsd-1-sel и fbsd-2-sel. Преимущество: рассинхрона нет, в Фазе 4 Ansible просто `copy: src=pf-ruleset.conf dest=/etc/pf.conf`. Изменения в v1→v2: добавлен `antispoof` (обязательная гигиена, в v1 отсутствовал), `set block-policy return` (RST на закрытые порты — косметика, не безопасность), закомментированный NAT-блок под jails (Фаза 2), закомментированный rate-limit на ssh (уже есть sshguard).
 - **2026-09-06 — сетевые настройки унифицированы на обеих нодах.** На `fbsd-2-sel` приведено к виду `fbsd-1-sel`: `search lab.sel`, CIDR-нотация в `ifconfig_vtnet0` (`172.16.0.4/16` вместо `172.16.0.4 netmask 255.255.0.0`), DNS-список расширен до 4 серверов (Google + Cloudflare + Yandex). Преимущество: при росте до N нод (Фаза 2–3) одна и та же Ansible-роль раскладывает `/etc/rc.conf` без условий. Заодно убрали лёгкий dean-on: на `fbsd-2-sel` был `search lab.local` — выглядело как «другая организация».
+- **2026-09-13 — `tank` сделан как дочерний dataset `zroot/tank`, а не отдельный zpool.** На Selectel VPS 1 диск `da0` на 30 ГБ, уже полностью размечен (boot + swap + zfs), свободного места под второй пул нет. Решение: `zfs create zroot/tank` плюс иерархия `data/logs/repl/secure`. В Фазе 3 (при нормальном железе или VPS с 2+ дисками) переделать на `zpool create tank mirror ...`, данные мигрируют через `zfs rename -p`. Дополнительно: `compression=lz4` на всех детях tank (экономия 20–30% на текстовых), `atime=off` (меньше write-операций), `reservation=2G` на `tank/secure` (гарантия места под будущий шифрованный dataset).
 
 ## Сеть
 
@@ -229,10 +230,10 @@ default            172.16.0.1         UGS         vtnet0
 
 ## Артефакты
 
-- [phase-1-zfs-report.md](./phase-1-zfs-report.md) — отчёт о результатах ZFS-тестов
+- [phase-1-zfs-report.md](./phase-1-zfs-report.md) — **создан 2026-09-13**, раздел «Структура zpool» заполнен; разделы Snapshot/Rollback, Encryption, Репликация, Failover — по мере прохождения дней
 - [pf-ruleset.conf](./pf-ruleset.conf) — **v2, актуальный**, единый ruleset для обеих нод
-- [zfs-replication.sh](./zfs-replication.sh) — скрипт репликации
-- [service-ssh-setup.md](./service-ssh-setup.md) — документация по сервисной SSH-учётке
+- [zfs-replication.sh](./zfs-replication.sh) — скрипт репликации (Неделя 3)
+- [service-ssh-setup.md](./service-ssh-setup.md) — документация по сервисной SSH-учётке (Неделя 3)
 
 ## Что дальше
 
