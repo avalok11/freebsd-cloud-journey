@@ -24,7 +24,7 @@
 - [+] Применить `pf-ruleset.conf` v2 на обе ноды (`pfctl -nf` → `pfctl -f`)
 - [+] Зафиксировано поведение Selectel edge (SYN/ACK на любой порт) в «Грабли»
 - [+] ZFS: создание zpool, датасетов (на fbsd-1-sel: `zroot/tank` как дочерний dataset, иерархия `data/logs/repl/secure`, см. `phase-1-zfs-report.md`)
-- [ ] ZFS: эксперименты со снапшотами, rollback, clone
+- [+] ZFS: эксперименты со снапшотами, rollback, clone
 - [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
 - [ ] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута)
 - [ ] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (комбинируем с Фазой 0.1 CA)
