@@ -102,8 +102,45 @@ sudo rm /zroot/tank/data/hello.txt
 
 ---
 
-## Snapshot / Rollback / Clone
-*(заполним в День 2)*
+## Snapshot / Rollback / Clone (День 2, 2026-10-03)
+
+**Цель:** убедиться, что rollback отменяет изменения, clone живёт независимо, send/receive работает локально (перед Неделей 3 — удалённая реплика).
+
+**Нода:** fbsd-1-sel
+**Рабочий dataset:** zroot/tank/data
+
+### Что делал (по шагам)
+
+1. Создал 100 файлов в zroot/tank/data/test/
+2. `zfs snapshot zroot/tank/data@test1` — снимок занимает ~56K (copy-on-write)
+3. Удалил 50 файлов
+4. `zfs rollback zroot/tank/data@test1` — все 100 файлов вернулись
+5. `zfs clone zroot/tank/data@test1 zroot/tank/data-clone` — клон
+   writable, содержит 100 файлов, изменения в клоне не затрагивают
+   оригинал
+6. `zfs destroy zroot/tank/data-clone` — клон удалён, оригинал и
+   снимок не пострадали
+7. `zfs send ... | zfs receive ...` — полный и инкрементальный
+   send/receive на ту же ноду (разминка)
+8. `zpool scrub zroot` — проверка целостности (для 1-дискового
+   пула формально бесполезна, привычка)
+
+### Ключевые наблюдения
+
+- Snapshot — **не копия**, а дельта (used = 56K при original100K).
+- Rollback **уничтожит любые изменения**, сделанные после
+  снимка. Если между снимком и rollback есть промежуточные
+  снимки — ZFS потребует `-r` (удалить их тоже) или `-f`.
+- Clone живёт пока существует **исходный snapshot**. Удалишь
+  snapshot до клона — clone станет невозможно удалить
+  (придётся `promote` clone в самостоятельный dataset).
+- `.zfs/snapshot/<name>/` — скрытый каталог с read-only содержимым
+  снимка. Полезно для выборочного доставания старых версий файлов.
+
+### Что НЕ делал
+
+- Удалённый send/receive (Неделя 3, fbsd-1-sel → fbsd-2-sel)
+- Автоматизация через cron (Фаза 4, Ansible)
 
 ## Encryption с keyfile
 *(заполним в День 3)*
