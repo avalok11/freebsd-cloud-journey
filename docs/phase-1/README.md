@@ -56,11 +56,12 @@
 
 - **День 1 (~2 ч) — Поднять `fbsd-2-sel` в Selectel**
   - Создать VPS: 1 vCPU, 1 ГБ RAM, 10 ГБ SSD, FreeBSD 15.1 amd64, тот же регион что `fbsd-1-sel` и `fbsd-ca-sel`
-  - Базовый харденинг по чек-листу Фазы 0: пользователь `avalok11` + sudo, sshd_config (PermitRootLogin no, PasswordAuthentication no, TOTP через Yandex Key), sshguard + PF, ntpd, баннер
+  - Базовый харденинг по чек-листу Фазы 0: пользователь `avalok11` + sudo, sshd_config (PermitRootLogin no, PasswordAuthentication no, **TOTP через Yandex Key → затем снят 2026-09-06, см. решение в архитектурном разделе**), sshguard + PF, ntpd, баннер
   - Подписать host-ключ `fbsd-2-sel` через `fbsd-ca-sel` (TTL 52w)
   - Скопировать `host_ca.pub` на Mac M4, обновить `~/.ssh/ca_known_hosts`
   - Проверить вход по сертификату с Mac
   - **Артефакт:** строка с IP `fbsd-2-sel` в `architecture.md` и `roadmap.md`
+  - **Итоговое состояние fbsd-2-sel по итогу Недели 1:** TOTP снят, единственная аутентификация — ed25519 + user-сертификат CA (TTL 8ч). Подробнее в `docs/architecture.md` → раздел «Безопасность на fbsd-2-sel (jump-only, без TOTP)».
 
 - **День 2 (~2 ч) — Сеть на FreeBSD**
   - Пройтись по `fbsd-1-sel` и `fbsd-2-sel`: `/etc/rc.conf` (hostname, defaultrouter, ifconfig_vtnet0, ipv6_*), `/etc/resolv.conf`, `route -n show`, `ifconfig vtnet0`
