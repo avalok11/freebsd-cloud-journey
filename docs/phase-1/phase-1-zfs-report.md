@@ -142,8 +142,32 @@ sudo rm /zroot/tank/data/hello.txt
 - Удалённый send/receive (Неделя 3, fbsd-1-sel → fbsd-2-sel)
 - Автоматизация через cron (Фаза 4, Ansible)
 
-## Encryption с keyfile
-*(заполним в День 3)*
+## Encryption с keyfile (День 3, 2026-10-03)
+**Цель:** `zroot/tank/secure` должен подниматься автоматически после ребута, без ручного ввода passphrase. Нужно для сервисных данных (Фаза 3, zfs-repl будет писать туда).
+### Параметры шифрования
+| Параметр | Значение | Зачем |
+|---|---|---|
+| encryption | aes-256-gcm | современный AEAD-алгоритм (аутентифицированный) |
+| keylocation | file:///etc/zfs/keys/tank-secure.key | ZFS сам читает ключ из файла при импорте пула |
+| keyformat | raw | 32 байта как есть, без кодирования |
+| keylength | 256 бит (32 байта) | сгенерировано через dd if=/dev/urandom |
+### Команды
+```sh
+sudo mkdir -p /etc/zfs/keys && sudo chmod 700 /etc/zfs/keys
+sudo dd if=/dev/urandom of=/etc/zfs/keys/tank-secure.key bs=32 count=1 conv=fdatasync
+sudo chmod 400 /etc/zfs/keys/tank-secure.key
+sudo chown root:wheel /etc/zfs/keys/tank-secure.key
+# Backup в KeePassXC: sudo cat /etc/zfs/keys/tank-secure.key | base64
+# (сырой binary не вставляется в 1Password — кодируем)
+sudo zfs destroy zroot/tank/secure    # старый plain, мы его создали в День 1
+sudo zfs create \
+ -o encryption=aes-256-gcm \
+    -o keylocation=file:///etc/zfs/keys/tank-secure.key \
+    -o keyformat=raw \
+    -o mountpoint=/secure \
+    -o reservation=256M \
+    zroot/tank/secure
+```
 
 ## Репликация `fbsd-1-sel → fbsd-2-sel`
 *(заполним в Неделе 3)*
