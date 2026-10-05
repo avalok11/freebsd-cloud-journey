@@ -26,7 +26,7 @@
 - [+] ZFS: создание zpool, датасетов (на fbsd-1-sel: `zroot/tank` как дочерний dataset, иерархия `data/logs/repl/secure`, см. `phase-1-zfs-report.md`)
 - [+] ZFS: эксперименты со снапшотами, rollback, clone
 - [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
-- [ ] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута)
+- [+] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута ) 
 - [ ] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (комбинируем с Фазой 0.1 CA)
 - [ ] Тест failover репликации
 - [ ] Сравнение с Linux (ext4+LVM, btrfs) на deb-arm
@@ -40,13 +40,13 @@
 
 ## Практика
 
-- [ ] Поднять `fbsd-2-sel` в Selectel + базовый харденинг (по чек-листу Фазы 0)
-- [ ] Полная настройка сети на FreeBSD (rc.conf, ifconfig, route, resolv.conf)
-- [ ] Установка и базовая настройка PF (ssh in, всё остальное block, NAT для будущих jails)
-- [ ] Создание zpool, датасетов
-- [ ] Снапшоты, clone, rollback
+- [+] Поднять `fbsd-2-sel` в Selectel + базовый харденинг (по чек-листу Фазы 0)
+- [+] Полная настройка сети на FreeBSD (rc.conf, ifconfig, route, resolv.conf)
+- [+] Установка и базовая настройка PF (ssh in, всё остальное block, NAT для будущих jails)
+- [+] Создание zpool, датасетов
+- [+] Снапшоты, clone, rollback
 - [ ] Репликация fbsd-1-sel → fbsd-2-sel через ssh
-- [ ] Шифрованный dataset с keyfile (`/etc/zfs/keys/tank-secure.key`, chmod 400)
+- [+] Шифрованный dataset с keyfile (`/etc/zfs/keys/tank-secure.key`, chmod 400)
 - [ ] Сервисный ssh `zfs-repl` с `forced-command` (можно подписывать ключ через `fbsd-ca-sel` из Фазы 0.1)
 
 ## План по неделям и дням (~6 ч/неделю)
@@ -156,6 +156,10 @@
 - **2026-09-06 — PF ruleset одинаковый на обеих нодах (v2).** Единый файл `docs/phase-1/pf-ruleset.conf` в репо, раскладывается одинаково на fbsd-1-sel и fbsd-2-sel. Преимущество: рассинхрона нет, в Фазе 4 Ansible просто `copy: src=pf-ruleset.conf dest=/etc/pf.conf`. Изменения в v1→v2: добавлен `antispoof` (обязательная гигиена, в v1 отсутствовал), `set block-policy return` (RST на закрытые порты — косметика, не безопасность), закомментированный NAT-блок под jails (Фаза 2), закомментированный rate-limit на ssh (уже есть sshguard).
 - **2026-09-06 — сетевые настройки унифицированы на обеих нодах.** На `fbsd-2-sel` приведено к виду `fbsd-1-sel`: `search lab.sel`, CIDR-нотация в `ifconfig_vtnet0` (`172.16.0.4/16` вместо `172.16.0.4 netmask 255.255.0.0`), DNS-список расширен до 4 серверов (Google + Cloudflare + Yandex). Преимущество: при росте до N нод (Фаза 2–3) одна и та же Ansible-роль раскладывает `/etc/rc.conf` без условий. Заодно убрали лёгкий dean-on: на `fbsd-2-sel` был `search lab.local` — выглядело как «другая организация».
 - **2026-09-13 — `tank` сделан как дочерний dataset `zroot/tank`, а не отдельный zpool.** На Selectel VPS 1 диск `da0` на 30 ГБ, уже полностью размечен (boot + swap + zfs), свободного места под второй пул нет. Решение: `zfs create zroot/tank` плюс иерархия `data/logs/repl/secure`. В Фазе 3 (при нормальном железе или VPS с 2+ дисками) переделать на `zpool create tank mirror ...`, данные мигрируют через `zfs rename -p`. Дополнительно: `compression=lz4` на всех детях tank (экономия 20–30% на текстовых), `atime=off` (меньше write-операций), `reservation=2G` на `tank/secure` (гарантия места под будущий шифрованный dataset).
+- **2026-10-03 — encryption aes-256-gcm, не aes-128-gcm и не aes-256-ccm.** aes-256-gcm — дефолт в OpenZFS 2.0+, защищён от tampering (AEAD), быстрый на современных CPU с AES-NI. aes-128 на 2026 — экономия 8 байт ключа, не имеет смысла.
+- **2026-10-03 — keyfile, а не passphrase.** Passphrase-вариант отвергнут: после ребута ноды в Selectel никто не введёт ключ руками, сервис не поднимется. См. «Ключевые решения» в phase-1/README.md.
+- **2026-10-03 — keyfile НЕ в публичном репо.** Положен в 1Password (base64), в git репо не попадает. Это per-host secret, на fbsd-2-sel будет свой.
+- **2026-10-03 — destroy + recreate вместо миграции существующего датасета.** ZFS не умеет «добавить encryption» к существующему dataset, только через destroy + create. У нас tank/secure был пустой (создан в День 1 как заготовка), потерь нет. Если бы там были данные — нужно было бы zfs send ... | zfs receive в новый зашифрованный dataset.
 
 ## Сеть
 
@@ -224,6 +228,7 @@ default            172.16.0.1         UGS         vtnet0
 - **2026-09-06 — search domain разный: `lab.sel` vs `lab.local`.** ~~На `fbsd-1-sel` стоит `search lab.sel` (по умолчанию из панели Selectel при создании VPS), на `fbsd-2-sel` я (или шаблон Selectel) задал `search lab.local`. Технической проблемы нет, но выглядит как «две ноды в разных доменах». Решение: унифицировать на `lab.sel` (соответствует `*.lab.sel` hostname'ам) в День 3, когда будем править `rc.conf` под `pf` — заодно.~~ **Решено 2026-09-06:** на `fbsd-2-sel` поставлен `search lab.sel`, DNS-список расширен до 4 серверов (как у `fbsd-1-sel`).
 - **2026-09-06 — синтаксис IP в `rc.conf` непоследовательный.** ~~`ifconfig_vtnet0="inet 172.16.0.2/16"` (CIDR) vs `ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"` (маска). Оба работают, оба задокументированы в `man rc.conf`. Привести к CIDR на `fbsd-2-sel` в День 3.~~ **Решено 2026-09-06:** на `fbsd-2-sel` переведено на CIDR-нотацию (`ifconfig_vtnet0="inet 172.16.0.4/16"`), теперь `rc.conf` обеих нод синтаксически идентичен.
 - **2026-09-06 — Selectel edge отвечает SYN/ACK на любой порт публичного IP (anti-scan / port knocking).** При `nmap -Pn -p 1-1024 178.72.xxx.xxx` показывает 1024 open порта, хотя реально на ноде открыт только 22/tcp. Подтверждается тем, что `telnet 21` подключается, но `pfctl -ss` показывает только ssh/ntp-коннекты, ftp-демон не установлен, в `services` ничего сверх sshd не запущено. **Реальный state проверять через приватный IP** (`ssh -J fbsd-1-sel ... nmap -sS 172.16.0.2`) или `nmap -sA` (ACK-сканирование, показывает filtered/unfiltered вместо open). В Selectel-документации это «защита от сканирования». В проде, если захочется реальный nmap снаружи, можно попросить Selectel отключить (обычно платная опция) — для нашего кейса не блокер.
+
 
 ## Метрики
 
