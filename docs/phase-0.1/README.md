@@ -56,7 +56,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 - [+] Создать структуру каталогов `/usr/local/sshca/`
 - [+] Сгенерировать User CA и Host CA
 - [+] Приватные ключи CA защищены (chmod 600)
-- [+] Бэкап CA в 1Password + зашифрованный архив на `fbsd-1-sel`
+- [+] Бэкап CA в password manager (KeePassXC у меня) + зашифрованный архив на `fbsd-1-sel`
 - [+] Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh`
 - [+] Подписан твой `~/.ssh/freebsd_lab.pub` (TTL 8 часов)
 - [+] Host-ключи `fbsd-1-sel` и `fbsd-arm` подписаны (TTL 52 недели)
@@ -93,7 +93,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
    sudo chmod 600 /usr/local/sshca/user_ca /usr/local/sshca/host_ca
    sudo chmod 644 /usr/local/sshca/user_ca.pub /usr/local/sshca/host_ca.pub
    ```
-5. **Бэкап приватных ключей CA** в 1Password + зашифрованный архив на `fbsd-1-sel`.
+5. **Бэкап приватных ключей CA** в password manager + зашифрованный архив на `fbsd-1-sel`.
 6. **Скрипт подписи** `sign-user-cert.sh` (см. ниже).
 7. **Подписать твой ключ** (с Mac M4):
    ```bash
@@ -564,5 +564,5 @@ sudo service sshd restart
 
 - **Приватные ключи CA** — самое ценное, что у нас есть. Хранятся только на `fbsd-ca-sel`, в `/usr/local/sshca/`, права 600.
 - **Структура каталогов** — `users/<username>/` и `hosts/<hostname>/` изолированы, чтобы не светить чужие ключи.
-- **Бэкап CA** — зашифрованный архив, в 1Password и на отдельной защищённой ноде.
+- **Бэкап CA** — зашифрованный архив, в password manager и на отдельной защищённой ноде.
 - **Отзыв** — если утекли приватные ключи CA, нужно генерировать новые и **сразу** обновлять `TrustedUserCAKeys` на всех нодах. Считай, что всё, что было подписано старым CA, скомпрометировано.

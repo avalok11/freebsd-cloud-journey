@@ -157,8 +157,8 @@ sudo mkdir -p /etc/zfs/keys && sudo chmod 700 /etc/zfs/keys
 sudo dd if=/dev/urandom of=/etc/zfs/keys/tank-secure.key bs=32 count=1 conv=fdatasync
 sudo chmod 400 /etc/zfs/keys/tank-secure.key
 sudo chown root:wheel /etc/zfs/keys/tank-secure.key
-# Backup в KeePassXC: sudo cat /etc/zfs/keys/tank-secure.key | base64
-# (сырой binary не вставляется в 1Password — кодируем)
+# Backup в password manager (KeePassXC): sudo cat /etc/zfs/keys/tank-secure.key | base64
+# (сырой binary не вставляется напрямую — кодируем в base64, вставляем строку)
 sudo zfs destroy zroot/tank/secure    # старый plain, мы его создали в День 1
 sudo zfs create \
  -o encryption=aes-256-gcm \
@@ -168,6 +168,12 @@ sudo zfs create \
     -o reservation=256M \
     zroot/tank/secure
 ```
+### Подводные камни
+- Шифрование в ZFS — **нативное (не LUKS)**. ZFS держит свои ключи в собственных метаданных, шифрует на уровне dataset'а (не пула). Если хочешь «всё шифровать» — нужно шифровать каждый dataset отдельно (или шифровать только нужные).
+- zfs send **с зашифрованного dataset'а**. По умолчанию zfs send шлёт расшифрованные данные в поток. Если реплика идёт по недоверенной сети — нужно -w (raw send, шлёт зашифрованные блоки, расшифровка происходит на принимающей стороне). Для нашего случая (Selectel приватная сеть) raw не критично, но в Фазе 3 напомню.
+- **Ключ в** etc/zfs/keys/ и rc.conf. Сейчас ничего в rc.conf менять не надо — ZFS сам читает keylocation из свойств dataset'а при импорте. Если бы хотели ключ на USB — было бы keylocation=prompt (passphrase при загрузке) или keylocation=file:///media/usb/... (зависит от того, успеет ли USB примонтироваться).
+- **Импорт пула на другой машине** (например, восстановление из бэкапа в Selectel) — без tank-secure.key dataset не поднимется, данные будут видны как «encrypted, key unavailable». Поэтому бэкап ключа в 1Password критичен.
+- zpool import без zfs load-key отдельно. С keylocation=file:// ничего делать не надо — ZFS сам загружает ключ. С keylocation=prompt пришлось бы вручную zfs load-key zroot/tank/secure перед mount.
 
 ## Репликация `fbsd-1-sel → fbsd-2-sel`
 *(заполним в Неделе 3)*

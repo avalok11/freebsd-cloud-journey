@@ -158,7 +158,7 @@
 - **2026-09-13 — `tank` сделан как дочерний dataset `zroot/tank`, а не отдельный zpool.** На Selectel VPS 1 диск `da0` на 30 ГБ, уже полностью размечен (boot + swap + zfs), свободного места под второй пул нет. Решение: `zfs create zroot/tank` плюс иерархия `data/logs/repl/secure`. В Фазе 3 (при нормальном железе или VPS с 2+ дисками) переделать на `zpool create tank mirror ...`, данные мигрируют через `zfs rename -p`. Дополнительно: `compression=lz4` на всех детях tank (экономия 20–30% на текстовых), `atime=off` (меньше write-операций), `reservation=2G` на `tank/secure` (гарантия места под будущий шифрованный dataset).
 - **2026-10-03 — encryption aes-256-gcm, не aes-128-gcm и не aes-256-ccm.** aes-256-gcm — дефолт в OpenZFS 2.0+, защищён от tampering (AEAD), быстрый на современных CPU с AES-NI. aes-128 на 2026 — экономия 8 байт ключа, не имеет смысла.
 - **2026-10-03 — keyfile, а не passphrase.** Passphrase-вариант отвергнут: после ребута ноды в Selectel никто не введёт ключ руками, сервис не поднимется. См. «Ключевые решения» в phase-1/README.md.
-- **2026-10-03 — keyfile НЕ в публичном репо.** Положен в 1Password (base64), в git репо не попадает. Это per-host secret, на fbsd-2-sel будет свой.
+- **2026-10-03 — keyfile НЕ в публичном репо.** Положен в password manager (KeePassXC) в виде base64-строки, в git репо не попадает. Это per-host secret, на fbsd-2-sel будет свой.
 - **2026-10-03 — destroy + recreate вместо миграции существующего датасета.** ZFS не умеет «добавить encryption» к существующему dataset, только через destroy + create. У нас tank/secure был пустой (создан в День 1 как заготовка), потерь нет. Если бы там были данные — нужно было бы zfs send ... | zfs receive в новый зашифрованный dataset.
 
 ## Сеть

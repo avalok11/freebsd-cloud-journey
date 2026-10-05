@@ -183,7 +183,7 @@ Mac M4 — **управляющая консоль**, не часть класт
     - В `/etc/pam.d/sshd` добавить модуль `pam_google_authenticator.so`.
     - В `/etc/ssh/sshd_config` установить `ChallengeResponseAuthentication yes` и `AuthenticationMethods publickey,keyboard-interactive:pam` (ключ + TOTP).
     - Проверить: войти по ключу → TOTP запрашивается.
-    - **Важно:** сохранить scratch-коды восстановления в надёжном месте (1Password / бумажка).
+    - **Важно:** сохранить scratch-коды восстановления в надёжном месте (password manager / бумажка в сейфе).
 13. Создать ВМ `deb-arm` с Debian 13.6 arm64: те же параметры. Будет использоваться для Linux-сравнения.
 
 **Шаг 2. Удалённый стенд (Selectel):**
@@ -311,7 +311,7 @@ graph TB
 - Только sshd, никаких других сервисов.
 - PF закрывает всё, кроме ssh.
 - sshguard для защиты от брутфорса.
-- Бэкап приватных ключей CA в 1Password + зашифрованный архив на `fbsd-1-sel`.
+- Бэкап приватных ключей CA в password manager (KeePassXC / 1Password / Bitwarden — что используется) + зашифрованный архив на `fbsd-1-sel`.
 
 ### Зачем сейчас, а не в Фазе 8
 
@@ -334,7 +334,7 @@ graph TB
 4. Генерация User CA и Host CA в `/usr/local/sshca/`.
 5. **Генерация сервисного ключа `ca_operator`** на `fbsd-ca-sel` (собственный SSH-ключ CA-сервера для доступа к нодам).
 6. **Подписать `ca_operator` сертификатом User CA** с TTL +52w.
-7. Защита приватных ключей: chmod 600, бэкап в 1Password.
+7. Защита приватных ключей: chmod 600, бэкап в password manager.
 8. Скрипты `sign-user-cert.sh`, `sign-host-cert.sh`, `revoke-ssh.sh`, `distribute-public-keys.sh`, `deploy-crl.sh` в `/usr/local/sshca/scripts/`.
 9. **Настроить `~/.ssh/config` на `fbsd-ca-sel`** для доступа к нодам через ca_operator.
 10. Раскопировать `user_ca.pub` и `host_ca.pub` на ноды (`distribute-public-keys.sh`).
