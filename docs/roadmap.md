@@ -106,7 +106,7 @@ Mac M4 — **управляющая консоль**, не часть класт
 2. **root по SSH запрещён.** Работаем через sudo из-под обычного пользователя.
 3. **Минимум 3 типа ssh-доступа:**
    - **Административный** — для тебя и заказчика, через пользователя с sudo.
-   - **Сервисный** — для ZFS-репликации, Ansible, бэкапов. Отдельный пользователь на каждой ноде, `nologin` шелл, `forced-command` в `authorized_keys`, ограничение по IP.
+   - **Сервисный** — для ZFS-репликации, Ansible, бэкапов. Отдельный пользователь на каждой ноде, ограничения `from=`/`force-command` в `AuthorizedPrincipalsFile` (для входа по сертификату), привязка к IP.
    - **Мониторинг** — отдельный ключ для node_exporter/Prometheus, если нужно дёргать ssh (чаще не нужно).
 4. **Разные ключи для разных задач.** Один ключ для всего = один скомпрометированный ключ = компрометация всего.
 
@@ -115,7 +115,7 @@ Mac M4 — **управляющая консоль**, не часть класт
 | Этап | Что делаем | Где в плане |
 |---|---|---|
 | Базовые ключи для админа | `ssh-keygen` ed25519, копируем на ноды, отключаем пароли | Фаза 0 |
-| Сервисный ключ для ZFS replication | пользователь `zfs-repl` без шелла, `forced-command` | Фаза 1 |
+| Сервисный ключ для ZFS replication | пользователь `zfs-repl`, шелл `/bin/sh`, `force-command` в `AuthorizedPrincipalsFile` | Фаза 1 |
 | Сервисный ключ для Ansible | пользователь `ansible` с sudo NOPASSWD на ограниченный набор команд | Фаза 4 |
 | Сервисный ключ для Restic/бэкапов | пользователь `backup` с доступом к нужным путям | Фаза 6 |
 | SSH-сертификаты (CA) | мини-CA, подписанные пользовательские и хост-ключи, TTL, revocation | Фаза 8 (продуктовый пакет) |
@@ -124,7 +124,7 @@ Mac M4 — **управляющая консоль**, не часть класт
 
 - **SSH по ключу vs SSH по сертификату:** в чём разница, когда что применять. Ключ = пара (приватный+публичный), сертификат = публичный ключ, подписанный CA. Сертификаты позволяют централизованно отзывать доступ, не лазая на каждую ноду.
 - **OpenSSH security best practices:** `sshd_config` харденинг — отключаем всё лишнее (X11, agent forwarding по умолчанию), включаем `AllowGroups`, `MaxAuthTries`, `LoginGraceTime`, `Protocol 2`.
-- **Сравнение с Linux:** на Linux тот же OpenSSH, разницы в настройке почти нет. Но в Linux-мире чаще накручивают fail2ban, а в BSD-мире чаще полагаются на PF + ограничения в `authorized_keys`.
+- **Сравнение с Linux:** на Linux тот же OpenSSH, разницы в настройке почти нет. Но в Linux-мире чаще накручивают fail2ban, а в BSD-мире чаще полагаются на PF + ограничения в `authorized_keys`/`AuthorizedPrincipalsFile`.
 - **MFA через ssh:** TOTP-аппаратный ключ (YubiKey) или `google-authenticator`. Когда обязательно для заказчика.
 
 ---
@@ -352,7 +352,7 @@ graph TB
 - **TTL работает:** подписать с TTL 1 минуту, подождать 2 минуты, попробовать зайти — должно отказать.
 - **Host verification работает:** при первом подключении к новой ноде ssh НЕ должен ругаться `Host key verification failed` (хосты подписаны).
 - **Отзыв работает:** подписать ключ, зайти — работает. Добавить в CRL, зайти — должно отказать.
-- **Сервисный ключ с `forced-command`:** создать ключ `zfs-repl`, подписать его, настроить `forced-command` через `authorized_keys` (CA это не отменяет — это работает параллельно).
+- **Сервисный ключ с `forced-command`:** создать ключ `zfs-repl`, подписать его, настроить `forced-command` через `AuthorizedPrincipalsFile` (в `authorized_keys` ограничения при входе по сертификату не применяются — см. `docs/phase-1/service-ssh-setup.md`).
 
 ### Артефакт
 - `infra-configs/roles/ssh-ca/` — Ansible-роль для раскладки CA-ключей (в Фазе 4).
@@ -380,9 +380,10 @@ graph TB
 5. Эксперименты с ZFS: snapshot, rollback, clone, send/receive на вторую ноду через ssh.
 6. Шифрованный dataset для чувствительных данных.
 7. **Настройка сервисного ssh-доступа для ZFS replication:**
-   - Создать пользователя `zfs-repl` с шеллом `/sbin/nologin`.
-   - Сгенерировать отдельный ed25519-ключ.
-   - В `/home/zfs-repl/.ssh/authorized_keys` прописать ограничения: `from="<ip-источника>",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty`.
+   - Создать пользователя `zfs-repl` с шеллом `/bin/sh` (`nologin` не подходит: `force-command` выполняется через login-shell).
+   - Сгенерировать отдельный ed25519-ключ, подписать через `fbsd-ca-sel` с principal `zfs-repl`.
+   - Включить `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` и создать `/etc/ssh/auth_principals/zfs-repl` с ограничениями: `from="172.16.0.2",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl`.
+   - `authorized_keys` для этой учётки не создаём — иначе отзыв сертификата обходится входом по «голому» ключу.
    - Проверить: с других хостов ключ не принимается, с правильного — работает только `zfs receive`.
 
 **Решения по стенду (фиксирую до старта):**

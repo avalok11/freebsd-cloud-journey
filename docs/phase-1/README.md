@@ -27,7 +27,7 @@
 - [+] ZFS: эксперименты со снапшотами, rollback, clone
 - [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
 - [+] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута ) 
-- [ ] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (комбинируем с Фазой 0.1 CA)
+- [+] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (ограничения в `auth_principals/%u` через `AuthorizedPrincipalsFile`, комбинируем с Фазой 0.1 CA) — см. `service-ssh-setup.md`
 - [ ] Тест failover репликации
 - [ ] Сравнение с Linux (ext4+LVM, btrfs) на deb-arm
 
@@ -108,19 +108,18 @@
 **Цель:** реплика работает end-to-end, сервисная SSH-учётка с `forced-command` принимает только `zfs receive` с правильного IP.
 
 - **День 1 (~2 ч) — Сервисный пользователь `zfs-repl`**
-  - На `fbsd-2-sel`: `pw useradd zfs-repl -s /sbin/nologin -m -d /home/zfs-repl`
-  - `mkdir -p /home/zfs-repl/.ssh && chmod 700 /home/zfs-repl/.ssh`
+  - На `fbsd-2-sel`: `pw useradd zfs-repl -s /bin/sh -m -d /home/zfs-repl` (шелл нужен, иначе `force-command` не выполнится)
   - На Mac M4: `ssh-keygen -t ed25519 -f ~/.ssh/zfs_repl -C "zfs-repl@avalok11-laptop"`
-  - Скопировать `~/.ssh/zfs_repl.pub` на `fbsd-2-sel` в `/tmp/`, оттуда на `fbsd-ca-sel`
+  - Скопировать `~/.ssh/zfs_repl.pub` на `fbsd-ca-sel`
   - На `fbsd-ca-sel`: `sudo /usr/local/sshca/scripts/sign-user-cert.sh /tmp/zfs_repl.pub zfs-repl +52w` (TTL 52 недели — сервисный ключ долгий)
-  - Скопировать `zfs_repl-cert.pub` обратно на `fbsd-2-sel` в `/home/zfs-repl/.ssh/`
-  - Создать `/home/zfs-repl/.ssh/authorized_keys` с жёсткими ограничениями:
+  - На `fbsd-2-sel`: включить `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` в `/etc/ssh/sshd_config.d/ca.conf` + рестарт sshd
+  - Создать `/etc/ssh/auth_principals/zfs-repl` с ограничениями (в конце строки — principal, а не публичный ключ):
     ```
-    from="178.72.xxx.xxx",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA... avalok11-laptop
+    from="172.16.0.2",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl
     ```
-    (IP — публичный `fbsd-1-sel`)
-  - `chmod 600 /home/zfs-repl/.ssh/authorized_keys && chown -R zfs-repl:zfs-repl /home/zfs-repl/.ssh/`
-  - **Артефакт:** `service-ssh-setup.md` — пошаговая инструкция + шаблон `authorized_keys`
+  - `chmod 644 /etc/ssh/auth_principals/zfs-repl && chown root:wheel /etc/ssh/auth_principals/zfs-repl`
+  - `/home/zfs-repl/.ssh/authorized_keys` **не создаётся** — иначе отзыв сертификата можно обойти входом по «голому» ключу
+  - **Артефакт:** `service-ssh-setup.md` — пошаговая инструкция + схема ограничений
 
 - **День 2 (~2 ч) — ZFS send/receive**
   - На `fbsd-1-sel`: `zfs snapshot tank/data@repl-test`
@@ -132,11 +131,11 @@
   - **Артефакт:** `zfs-replication.sh` в `docs/phase-1/`
 
 - **День 3 (~2 ч) — Тесты + failover**
-  - **Тест 1 (forced-command):** с Mac M4 `ssh -i ~/.ssh/zfs_repl-cert zfs-repl@fbsd-2-sel.lab.sel ls` — должно отказать, выполняется только `zfs receive`
-  - **Тест 2 (from=):** с другого IP (попробовать с `fbsd-arm.lab.local` через UTM-роутер, или просто записать левый IP в `from=` и убедиться что reject) — ключ не принимается
-  - **Тест 3 (nologin):** `ssh -i ~/.ssh/zfs_repl-cert zfs-repl@fbsd-2-sel.lab.sel` — сразу `Connection closed by authenticating user zfs-repl`
+  - **Тест 1 (source-address):** `ssh -v -i ~/.ssh/zfs_repl-cert zfs-repl@172.16.0.4 id` **без `-J`** — `Permission denied`, IP Mac M4 не 172.16.0.2
+  - **Тест 2 (force-command):** `ssh -v -i ~/.ssh/zfs_repl-cert -J fbsd-1-sel zfs-repl@172.16.0.4 id` — в debug-логе `Sending command: /usr/bin/env zfs receive -F tank/repl`, а не `id`
+  - **Тест 3 (no-pty):** та же команда с `-T` — pty не выделяется, интерактивный шелл не открывается
   - **Тест 4 (failover):** остановить `fbsd-1-sel` через панель Selectel, проверить что `tank/repl` на `fbsd-2-sel` смонтирован и читаем
-  - **Тест 5 (scrub):** `zpool scrub tank` на обеих нодах, `zpool status` — `done` без ошибок
+  - **Тест 5 (scrub):** `zpool scrub zroot` на обеих нодах, `zpool status` — без ошибок
   - **Артефакт:** `service-ssh-setup.md` — раздел «Тесты», `phase-1-zfs-report.md` — раздел «Failover»
 
 ## Тестирование
@@ -145,14 +144,16 @@
 - [ ] ZFS: snapshot, rollback, scrub
 - [ ] ZFS replication: на вторую ноду отправить dataset, на второй ноде смонтировать
 - [ ] Failover-тест: симулировать падение основной ноды
-- [ ] Сервисный SSH-тест: зайти под `zfs-repl` интерактивно отказать, с другого IP ключ не принимается, с правильного IP работает только `zfs receive`
+- [ ] Сервисный SSH-тест: зайти под `zfs-repl` интерактивно отказать, с другого IP ключ не принимается, с правильного IP работает только `zfs receive` (тесты 1–3 описаны в плане Дня 3)
 
 ## Ключевые решения
 
-- **2026-09-06 — fbsd-2-sel: TOTP снят, single-factor (ed25519 + сертификат).** У ноды нет публичного IP, единственный путь входа — через `fbsd-1-sel` (jump-host), на котором TOTP уже стоит. Двойной TOTP на цепочке избыточен. Защита ноды — пара ed25519-ключ + сертификат CA с TTL 8h. Tradeoff сознательный: компрометация ключа на ноуте = вход на fbsd-2-sel, но без TOTP-приложения. Если позже захочется жёстче — добавим `from="172.16.0.2"` в `authorized_keys` (только с jump-host'а).
+- **2026-09-06 — fbsd-2-sel: TOTP снят, single-factor (ed25519 + сертификат).** У ноды нет публичного IP, единственный путь входа — через `fbsd-1-sel` (jump-host), на котором TOTP уже стоит. Двойной TOTP на цепочке избыточен. Защита ноды — пара ed25519-ключ + сертификат CA с TTL 8h. Tradeoff сознательный: компрометация ключа на ноуте = вход на fbsd-2-sel, но без TOTP-приложения. Если позже захочется жёстче — добавим `from="172.16.0.2"` в `AuthorizedPrincipalsFile` (только с jump-host'а); для учётки `zfs-repl` это уже сделано.
 - **2026-08-30 — fbsd-2-sel: только приватный IP, jump-host через fbsd-1-sel.** Экономит ~150–200 ₽/мес на публичном IP, ZFS-реплика и сервисный SSH идут по `172.16.0.0/16` (быстрее, без публичного egress). Минус: в случае падения fbsd-1-sel нужно лезть в панель Selectel, чтобы попасть на fbsd-2-sel напрямую — для Фазы 1 приемлемо, в Фазе 3 (CARP) — будет решена через VIP.
 - **2026-08-30 — шифрованный dataset: keyfile, не passphrase.** `zfs create -o encryption=aes-256-gcm -o keylocation=file:///etc/zfs/keys/tank-secure.key -o keyformat=raw tank/secure`. Keyfile `chmod 400`, владелец `root:wheel`. Даёт автоподъём после ребута без ручного ввода passphrase — нужно для сервисных данных (`zfs-repl` будет туда писать). Passphrase-вариант отвергнут: некому вводить ключ после ребута ноды в Selectel.
 - **2026-08-30 — сервисный ключ zfs_repl: TTL 52w (не 8h как у обычного freebsd_lab).** Сервисные репликации должны идти по расписанию без ручной переподписи каждые 8 часов. Бонус: ключ подписывается через `fbsd-ca-sel` (Фаза 0.1) — единый процесс с пользовательскими ключами, revoke через тот же CRL.
+- **2026-10-08 — ограничения сервисной учётки задаются в `AuthorizedPrincipalsFile`, а не в `authorized_keys`.** Директива `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` + файл `/etc/ssh/auth_principals/zfs-repl`, где в конце строки стоит имя principal'а вместо публичного ключа. Причина: при входе по сертификату sshd ищет опции **не по публичному ключу пользователя**, а по ключу CA — ограничения из `authorized_keys` просто не применяются (подробно в «Грабли»). Побочный плюс: смена ограничений — правка одного файла на сервере, без переподписи сертификата и без перекладывания его на клиента. `authorized_keys` для `zfs-repl` намеренно не создаётся, иначе отзыв сертификата через CA обходится входом по «голому» ключу.
+- **2026-10-08 — у `zfs-repl` шелл `/bin/sh`, а не `/sbin/nologin`.** `force-command` sshd выполняет через login-shell пользователя, поэтому с `nologin` принудительная команда не запустится вовсе. Запрет шелла обеспечивается опцией `no-pty` и подменой любой команды клиента на `force-command`. Первоначальный план Фазы 1 указывал `nologin` — на практике нерабочий.
 - **2026-09-06 — PF ruleset одинаковый на обеих нодах (v2).** Единый файл `docs/phase-1/pf-ruleset.conf` в репо, раскладывается одинаково на fbsd-1-sel и fbsd-2-sel. Преимущество: рассинхрона нет, в Фазе 4 Ansible просто `copy: src=pf-ruleset.conf dest=/etc/pf.conf`. Изменения в v1→v2: добавлен `antispoof` (обязательная гигиена, в v1 отсутствовал), `set block-policy return` (RST на закрытые порты — косметика, не безопасность), закомментированный NAT-блок под jails (Фаза 2), закомментированный rate-limit на ssh (уже есть sshguard).
 - **2026-09-06 — сетевые настройки унифицированы на обеих нодах.** На `fbsd-2-sel` приведено к виду `fbsd-1-sel`: `search lab.sel`, CIDR-нотация в `ifconfig_vtnet0` (`172.16.0.4/16` вместо `172.16.0.4 netmask 255.255.0.0`), DNS-список расширен до 4 серверов (Google + Cloudflare + Yandex). Преимущество: при росте до N нод (Фаза 2–3) одна и та же Ansible-роль раскладывает `/etc/rc.conf` без условий. Заодно убрали лёгкий dean-on: на `fbsd-2-sel` был `search lab.local` — выглядело как «другая организация».
 - **2026-09-13 — `tank` сделан как дочерний dataset `zroot/tank`, а не отдельный zpool.** На Selectel VPS 1 диск `da0` на 30 ГБ, уже полностью размечен (boot + swap + zfs), свободного места под второй пул нет. Решение: `zfs create zroot/tank` плюс иерархия `data/logs/repl/secure`. В Фазе 3 (при нормальном железе или VPS с 2+ дисками) переделать на `zpool create tank mirror ...`, данные мигрируют через `zfs rename -p`. Дополнительно: `compression=lz4` на всех детях tank (экономия 20–30% на текстовых), `atime=off` (меньше write-операций), `reservation=2G` на `tank/secure` (гарантия места под будущий шифрованный dataset).
@@ -228,6 +229,8 @@ default            172.16.0.1         UGS         vtnet0
 - **2026-09-06 — search domain разный: `lab.sel` vs `lab.local`.** ~~На `fbsd-1-sel` стоит `search lab.sel` (по умолчанию из панели Selectel при создании VPS), на `fbsd-2-sel` я (или шаблон Selectel) задал `search lab.local`. Технической проблемы нет, но выглядит как «две ноды в разных доменах». Решение: унифицировать на `lab.sel` (соответствует `*.lab.sel` hostname'ам) в День 3, когда будем править `rc.conf` под `pf` — заодно.~~ **Решено 2026-09-06:** на `fbsd-2-sel` поставлен `search lab.sel`, DNS-список расширен до 4 серверов (как у `fbsd-1-sel`).
 - **2026-09-06 — синтаксис IP в `rc.conf` непоследовательный.** ~~`ifconfig_vtnet0="inet 172.16.0.2/16"` (CIDR) vs `ifconfig_vtnet0="inet 172.16.0.4 netmask 255.255.0.0"` (маска). Оба работают, оба задокументированы в `man rc.conf`. Привести к CIDR на `fbsd-2-sel` в День 3.~~ **Решено 2026-09-06:** на `fbsd-2-sel` переведено на CIDR-нотацию (`ifconfig_vtnet0="inet 172.16.0.4/16"`), теперь `rc.conf` обеих нод синтаксически идентичен.
 - **2026-09-06 — Selectel edge отвечает SYN/ACK на любой порт публичного IP (anti-scan / port knocking).** При `nmap -Pn -p 1-1024 178.72.xxx.xxx` показывает 1024 open порта, хотя реально на ноде открыт только 22/tcp. Подтверждается тем, что `telnet 21` подключается, но `pfctl -ss` показывает только ssh/ntp-коннекты, ftp-демон не установлен, в `services` ничего сверх sshd не запущено. **Реальный state проверять через приватный IP** (`ssh -J fbsd-1-sel ... nmap -sS 172.16.0.2`) или `nmap -sA` (ACK-сканирование, показывает filtered/unfiltered вместо open). В Selectel-документации это «защита от сканирования». В проде, если захочется реальный nmap снаружи, можно попросить Selectel отключить (обычно платная опция) — для нашего кейса не блокер.
+- **2026-10-08 — `authorized_keys` не применяется при входе по сертификату.** Ограничения (`from=`, `command=`, `no-*`), прописанные в `/home/zfs-repl/.ssh/authorized_keys`, **не срабатывают**, если клиент предъявляет сертификат вместо «голого» ключа. Наблюдение: с сертификатом в логе `Sending command: id` (принудительная команда не подменилась), а стоило убрать сертификат — те же ограничения отработали как надо. Причина: при аутентификации по сертификату sshd ищет опции **по ключу CA**, а не по публичному ключу пользователя; строка с пользовательским ключом как источник опций просто не читается. **Решение:** директива `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` + файл `/etc/ssh/auth_principals/zfs-repl`, где ограничения привязаны к principal'у, а не к ключу.
+- **2026-10-08 — `force-command` требует реальный шелл, `nologin` его ломает.** sshd выполняет `force-command` через login-shell пользователя. С `/sbin/nologin` сессия завершается «This account is currently not available» и принудительная команда не запускается. У `zfs-repl` шелл `/bin/sh`, запрет интерактивного входа обеспечивается `no-pty` и подменой команды. Второй эффект: `scp`/`sftp` под этой учёткой тоже не работают (им нужен шелл и Subsystem), что для сервисной реплики является плюсом.
 
 
 ## Метрики
@@ -239,7 +242,7 @@ default            172.16.0.1         UGS         vtnet0
 - [phase-1-zfs-report.md](./phase-1-zfs-report.md) — **создан 2026-09-13**, раздел «Структура zpool» заполнен; разделы Snapshot/Rollback, Encryption, Репликация, Failover — по мере прохождения дней
 - [pf-ruleset.conf](./pf-ruleset.conf) — **v2, актуальный**, единый ruleset для обеих нод
 - [zfs-replication.sh](./zfs-replication.sh) — скрипт репликации (Неделя 3)
-- [service-ssh-setup.md](./service-ssh-setup.md) — документация по сервисной SSH-учётке (Неделя 3)
+- [service-ssh-setup.md](./service-ssh-setup.md) — **создан 2026-10-08**: сервисная учётка `zfs-repl`, ограничения в `AuthorizedPrincipalsFile`, тесты
 
 ## Что дальше
 

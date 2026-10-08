@@ -1,7 +1,7 @@
 #!/bin/sh
 # Подписать host-ключ сервера.
 # Использование: sign-host-cert.sh <host-pubkey> <hostname> [ttl]
-# Пример: sign-host-cert.sh /etc/ssh/sshd_host_ed25519_key.pub fbsd-1-sel +52w
+# Пример: sign-host-cert.sh /etc/ssh/ssh_host_ed25519_key.pub fbsd-1-sel +52w
 
 set -e
 

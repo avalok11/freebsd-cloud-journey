@@ -32,7 +32,7 @@ graph TB
     Console -->|"ssh по ключу"| DARM
     Console -->|"git push"| GH
     CA -. "подписывает user-ключи" .-> Console
-    CA -. "подписывает user-ключи (zfs-repl TTL 52w)" .-> Console
+    CA -. "подписывает user-ключи (zfs-repl, ограничения в auth_principals)" .-> Console
     CA -. "подписывает host-ключи" .-> F1
     CA -. "подписывает host-ключи" .-> F2
     CA -. "подписывает host-ключи" .-> FARM

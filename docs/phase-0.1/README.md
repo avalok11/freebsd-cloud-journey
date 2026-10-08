@@ -28,8 +28,8 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 │   └── ...
 ├── hosts/                   # подписанные host-сертификаты
 │   ├── fbsd-1-sel/
-│   │   ├── sshd_host_ed25519_key.pub
-│   │   ├── sshd_host_ed25519_key-cert.pub
+│   │   ├── ssh_host_ed25519_key.pub
+│   │   ├── ssh_host_ed25519_key-cert.pub
 │   │   └── history.log
 │   ├── fbsd-arm/
 │   │   └── ...
@@ -72,7 +72,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 Ключевые понятия (кратко, для понимания что делаем):
 
 - **User CA** — подписывает пользовательские публичные ключи. Результат — сертификат `id_ed25519-cert.pub` с TTL и principals.
-- **Host CA** — подписывает хостовые ключи серверов. Результат — сертификат `sshd_host_ed25519_key-cert.pub`. Клиенты автоматически доверяют хосту, подписанному CA.
+- **Host CA** — подписывает хостовые ключи серверов. Результат — сертификат `ssh_host_ed25519_key-cert.pub`. Клиенты автоматически доверяют хосту, подписанному CA.
 - **TTL (`-V +8h:00`)** — срок действия. По истечении — сертификат невалиден.
 - **Principals (`-n avalok11,root`)** — какие логины разрешены для этого сертификата. Защита: подписанный ключ от `avalok11` не пустит как `root`, даже если подписан CA.
 - **CRL (`RevokedKeys`)** — файл с отозванными публичными ключами. Хоть срок действия истёк, в CRL добавляют для раннего отзыва.
@@ -182,7 +182,7 @@ echo "Скопируйте его на ноду клиента рядом с п�
 #!/bin/sh
 # Подписать host-ключ сервера.
 # Использование: sign-host-cert.sh <host-pubkey> <hostname> [ttl]
-# Пример: sign-host-cert.sh /etc/ssh/sshd_host_ed25519_key.pub fbsd-1-sel +52w
+# Пример: sign-host-cert.sh /etc/ssh/ssh_host_ed25519_key.pub fbsd-1-sel +52w
 
 set -e
 
@@ -239,7 +239,7 @@ echo "  HostCertificate $PUBKEY-cert.pub"
 #   revoke-ssh.sh host <hostname> <keyname>
 # Пример:
 #   revoke-ssh.sh user avalok11 freebsd_lab
-#   revoke-ssh.sh host fbsd-1-sel sshd_host_ed25519_key
+#   revoke-ssh.sh host fbsd-1-sel ssh_host_ed25519_key
 
 set -e
 
@@ -305,17 +305,17 @@ echo "Перезапустите sshd на всех нодах."
 
 ```bash
 # На Mac M4
-scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_1_SEL>:/etc/ssh/sshd_host_ed25519_key.pub /tmp/
+scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_1_SEL>:/etc/ssh/ssh_host_ed25519_key.pub /tmp/
 ```
 
 **8.2. Подписать на CA:**
 
 ```bash
 # Скопировать ключ на fbsd-ca-sel
-scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key.pub avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/tmp/
+scp -i ~/.ssh/freebsd_lab /tmp/ssh_host_ed25519_key.pub avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/tmp/
 
 # На fbsd-ca-sel
-sudo /usr/local/sshca/scripts/sign-host-cert.sh /tmp/sshd_host_ed25519_key.pub fbsd-1-sel +52w
+sudo /usr/local/sshca/scripts/sign-host-cert.sh /tmp/ssh_host_ed25519_key.pub fbsd-1-sel +52w
 # Ввести passphrase Host CA
 ```
 
@@ -323,10 +323,10 @@ sudo /usr/local/sshca/scripts/sign-host-cert.sh /tmp/sshd_host_ed25519_key.pub f
 
 ```bash
 # На Mac M4
-scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/hosts/fbsd-1-sel/sshd_host_ed25519_key-cert.pub /tmp/
+scp -i ~/.ssh/freebsd_lab avalok11@<PUBLIC_IP_FBSD_CA_SEL>:/usr/local/sshca/hosts/fbsd-1-sel/ssh_host_ed25519_key-cert.pub /tmp/
 
 # Отправить на fbsd-1-sel
-scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key-cert.pub avalok11@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
+scp -i ~/.ssh/freebsd_lab /tmp/ssh_host_ed25519_key-cert.pub avalok11@<PUBLIC_IP_FBSD_1_SEL>:/tmp/
 ```
 
 **Повторить для `fbsd-arm`** (заменив `fbsd-1-sel` на `fbsd-arm`).
@@ -336,9 +336,9 @@ scp -i ~/.ssh/freebsd_lab /tmp/sshd_host_ed25519_key-cert.pub avalok11@<PUBLIC_I
 **На каждой ноде (`fbsd-1-sel`, `fbsd-arm`):**
 
 ```bash
-sudo cp /tmp/sshd_host_ed25519_key-cert.pub /etc/ssh/
-sudo chown root:wheel /etc/ssh/sshd_host_ed25519_key-cert.pub
-sudo chmod 600 /etc/ssh/sshd_host_ed25519_key-cert.pub
+sudo cp /tmp/ssh_host_ed25519_key-cert.pub /etc/ssh/
+sudo chown root:wheel /etc/ssh/ssh_host_ed25519_key-cert.pub
+sudo chmod 600 /etc/ssh/ssh_host_ed25519_key-cert.pub
 ```
 
 ### Шаг 10. Настроить `sshd_config` на нодах
@@ -355,7 +355,7 @@ sudo ee /etc/ssh/sshd_config
 ```
 # SSH Certificate Authority
 TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
-HostCertificate /etc/ssh/sshd_host_ed25519_key-cert.pub
+HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
 RevokedKeys /etc/ssh/ca/revoked_keys
 ```
 
