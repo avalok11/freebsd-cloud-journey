@@ -109,7 +109,7 @@ graph TB
 | Нода | Пул | Назначение | RAID |
 |---|---|---|---|
 | fbsd-1-sel | zroot + tank | Система + данные для реплики | stripe на Selectel (1 диск); mirror в проде |
-| fbsd-2-sel | zroot + tank | Система + приёмник реплики (`tank/repl`) | stripe на Selectel |
+| fbsd-2-sel | zroot + tank | Система + приёмник реплики (`zroot/tank/repl`) | stripe на Selectel |
 | fbsd-3-sel | tank | Бэкапы, offsite-реплики | mirror (планируется) |
 
 ## Сервисы в Bastille-jails (планируется)

@@ -25,9 +25,14 @@
 - [+] Зафиксировано поведение Selectel edge (SYN/ACK на любой порт) в «Грабли»
 - [+] ZFS: создание zpool, датасетов (на fbsd-1-sel: `zroot/tank` как дочерний dataset, иерархия `data/logs/repl/secure`, см. `phase-1-zfs-report.md`)
 - [+] ZFS: эксперименты со снапшотами, rollback, clone
-- [ ] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
+- [+] ZFS send/receive: fbsd-1-sel → fbsd-2-sel
+  - [+] Первичная репликация `zroot/tank/data` → `zroot/tank/repl` по приватной сети Selectel
+  - [+] Скрипт `zfs-replication.sh`: первая отправка полная, далее инкремент `zfs send -i`
+  - [+] Проверено 4 итерации (1 полная + 3 инкремента), данные и снапшоты на месте
+  - [+] Права на приём выданы через `zfs allow`, `sudo` на replica не требуется
+  - [ ] Failover-тест (День 3)
 - [+] Шифрованный dataset (keyfile, не passphrase — для автоподъёма после ребута ) 
-- [+] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (ограничения в `auth_principals/%u` через `AuthorizedPrincipalsFile`, комбинируем с Фазой 0.1 CA) — см. `service-ssh-setup.md`
+- [+] Сервисный SSH-пользователь `zfs-repl` с `forced-command` (ограничения в `auth_principals/%u` через `AuthorizedPrincipalsFile`, комбинируем с Фазой 0.1 CA, права на приём — `zfs allow` без sudo) — см. `service-ssh-setup.md`
 - [ ] Тест failover репликации
 - [ ] Сравнение с Linux (ext4+LVM, btrfs) на deb-arm
 
@@ -45,9 +50,9 @@
 - [+] Установка и базовая настройка PF (ssh in, всё остальное block, NAT для будущих jails)
 - [+] Создание zpool, датасетов
 - [+] Снапшоты, clone, rollback
-- [ ] Репликация fbsd-1-sel → fbsd-2-sel через ssh
+- [+] Репликация fbsd-1-sel → fbsd-2-sel через ssh (сервисная учётка `zfs-repl`, `zfs allow` вместо sudo)
 - [+] Шифрованный dataset с keyfile (`/etc/zfs/keys/tank-secure.key`, chmod 400)
-- [ ] Сервисный ssh `zfs-repl` с `forced-command` (можно подписывать ключ через `fbsd-ca-sel` из Фазы 0.1)
+- [+] Сервисный ssh `zfs-repl` с `forced-command` (ключ подписан через `fbsd-ca-sel` из Фазы 0.1, ограничения — в `AuthorizedPrincipalsFile`)
 
 ## План по неделям и дням (~6 ч/неделю)
 
@@ -115,38 +120,51 @@
   - На `fbsd-2-sel`: включить `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` в `/etc/ssh/sshd_config.d/ca.conf` + рестарт sshd
   - Создать `/etc/ssh/auth_principals/zfs-repl` с ограничениями (в конце строки — principal, а не публичный ключ):
     ```
-    from="172.16.0.2",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl
+    from="172.16.0.2",command="/usr/bin/env /sbin/zfs receive -F zroot/tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl
     ```
   - `chmod 644 /etc/ssh/auth_principals/zfs-repl && chown root:wheel /etc/ssh/auth_principals/zfs-repl`
   - `/home/zfs-repl/.ssh/authorized_keys` **не создаётся** — иначе отзыв сертификата можно обойти входом по «голому» ключу
   - **Артефакт:** `service-ssh-setup.md` — пошаговая инструкция + схема ограничений
 
-- **День 2 (~2 ч) — ZFS send/receive**
-  - На `fbsd-1-sel`: `zfs snapshot tank/data@repl-test`
-  - `zfs send tank/data@repl-test | ssh -i ~/.ssh/freebsd_lab-cert avalok11@fbsd-2-sel.lab.sel "sudo /usr/bin/env zfs receive -F tank/repl/data"`
-  - Если ssh-сессия под `avalok11`, а не `zfs-repl` — это для отладки. Для боевой реплики — отдельный ключ `zfs-repl`
-  - На `fbsd-2-sel`: проверить `zfs list tank/repl/data`, смонтировать, `ls` — данные на месте
-  - Обернуть в `zfs-replication.sh`: инкрементальный `zfs send -i tank/data@prev tank/data@new`
-  - Добавить в cron (позже, в Фазе 4 через Ansible) — пока руками через `cron` на 15 минут для теста
-  - **Артефакт:** `zfs-replication.sh` в `docs/phase-1/`
+- **День 2 (~2 ч) — ZFS send/receive** — *выполнен 2026-10-10 — 2026-10-11*
+  - На `fbsd-1-sel`: `zfs snapshot zroot/tank/data@repl-1`
+  - На `fbsd-2-sel`: подготовить приёмник `zfs create zroot/tank` и выдать права `sudo zfs allow -u zfs-repl compression,mountpoint,mount,create,receive zroot/tank/repl`
+  - Отправка (запускается от root с master, ключ в `/root/.ssh/zfs_repl`):
+
+    ```sh
+    zfs send zroot/tank/data@repl-1 | ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4
+    ```
+
+    После адреса узла **никакой команды не пишем** — её подставляет `force-command` на replica (грабли №1 в разделе «Грабли»).
+  - Инкремент на следующей итерации: `zfs snapshot zroot/tank/data@repl-2`, затем `zfs send -i zroot/tank/data@repl-1 zroot/tank/data@repl-2 | ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4`
+  - На `fbsd-2-sel`: `zfs list -t all -o name,used,mountpoint | grep repl` — снапшоты приходят как `zroot/tank/repl@repl-N`, данные лежат в `/zroot/tank/repl`
+  - Обернуть в `zfs-replication.sh`: первый запуск без `-i` (полный поток), дальше `zfs send -i $PREV $LATEST`, прогресс в `/var/db/zfs-replication/last-snapshot`
+  - Добавить в cron (позже, в Фазе 4 через Ansible) — пока запуск руками от root
+  - **Артефакт:** `zfs-replication.sh` + раздел «Репликация fbsd-1-sel → fbsd-2-sel» в `phase-1-zfs-report.md` — *выполнено*
 
 - **День 3 (~2 ч) — Тесты + failover**
-  - **Тест 1 (source-address):** `ssh -v -i ~/.ssh/zfs_repl-cert zfs-repl@172.16.0.4 id` **без `-J`** — `Permission denied`, IP Mac M4 не 172.16.0.2
-  - **Тест 2 (force-command):** `ssh -v -i ~/.ssh/zfs_repl-cert -J fbsd-1-sel zfs-repl@172.16.0.4 id` — в debug-логе `Sending command: /usr/bin/env zfs receive -F tank/repl`, а не `id`
+  - **Тест 1 (source-address):** подключиться к `zfs-repl@172.16.0.4` с Mac M4 напрямую, без `-J` — `Permission denied`, IP ноутбука не `172.16.0.2`
+  - **Тест 2 (force-command):** `sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id` **с master и от root** (иначе ключ в `/root/.ssh/` нечитаем) — в debug-логе `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl`, а не `id`
   - **Тест 3 (no-pty):** та же команда с `-T` — pty не выделяется, интерактивный шелл не открывается
-  - **Тест 4 (failover):** остановить `fbsd-1-sel` через панель Selectel, проверить что `tank/repl` на `fbsd-2-sel` смонтирован и читаем
+  - **Тест 4 (failover):** остановить `fbsd-1-sel` через панель Selectel, проверить что `zroot/tank/repl` на `fbsd-2-sel` смонтирован и читаем
   - **Тест 5 (scrub):** `zpool scrub zroot` на обеих нодах, `zpool status` — без ошибок
   - **Артефакт:** `service-ssh-setup.md` — раздел «Тесты», `phase-1-zfs-report.md` — раздел «Failover»
 
 ## Тестирование
 
 - [ ] Сетевое: PF правила работают, nmap снаружи показывает только ssh
-- [ ] ZFS: snapshot, rollback, scrub
-- [ ] ZFS replication: на вторую ноду отправить dataset, на второй ноде смонтировать
+- [+] ZFS: snapshot, rollback, scrub
+- [+] ZFS replication: на вторую ноду отправить dataset, на второй ноде смонтировать
 - [ ] Failover-тест: симулировать падение основной ноды
 - [ ] Сервисный SSH-тест: зайти под `zfs-repl` интерактивно отказать, с другого IP ключ не принимается, с правильного IP работает только `zfs receive` (тесты 1–3 описаны в плане Дня 3)
 
 ## Ключевые решения
+
+- **2026-10-11 — приватный ключ `zfs-repl` лежит на master (`/root/.ssh/zfs_repl`), а не на ноутбуке.** Причина чисто техническая: ограничение `from="172.16.0.2"` пропускает соединения только с `fbsd-1-sel`, поэтому запуск репликации с Mac M4 был бы отвергнут на replica. Побочная выгода — при потере или заражении ноутбука репликация по расписанию продолжает работать, секрет репликации не покидает периметр стенда. Отдельного пользователя-«отправителя» на master не заводили: `zfs send` всё равно требует root, а лишний sudo на master ухудшил бы безопасность без выигрыша.
+- **2026-10-11 — права на приём выданы через `zfs allow`, sudoers-правило удалено.** На старте планировалось `zfs-repl ALL=(root) NOPASSWD: /sbin/zfs receive *` в sudoers. Работает, но даёт учётке полноценный root на время команды: если `force-command` когда-нибудь обойдут, `zfs-repl` становится root на replica. Вместо этого выдано `zfs allow -u zfs-repl compression,mountpoint,mount,create,receive zroot/tank/repl` — операции только с одним датасетом. Принцип наименьших привилегий соблюдён, а лишний sudoers-файл убран с сервера.
+- **2026-10-11 — прогресс репликации хранится на master (`/var/db/zfs-replication/last-snapshot`), replica не опрашивается.** При `force-command` любой запрос к replica превращается в `zfs receive` — вернуть список принятых снапшотов нечем. Полноценный вариант «stateful + query» (отдельный административный канал) отложен на будущее. Компромисс безопасен: при рассинхроне маркера худший сценарий — лишний полный поток, потери данных не будет.
+- **2026-10-11 — имя приёмника `zroot/tank/repl` (полный путь от корня пула).** В `force-command` датасет указывается от корня пула; краткое `tank/repl` на replica не резолвилось и приём падал с `cannot receive new filesystem stream`.
+- **2026-10-11 — TOTP на replica для `zfs-repl` не используется.** Учётка сервисная, вход идёт по ed25519 + сертификату CA с principal=`zfs-repl` и TTL 52w. Второй фактор для непубличной jump-only ноды избыточен: безопасность обеспечивается сертификатом, `from=`-ограничением и `force-command`.
 
 - **2026-09-06 — fbsd-2-sel: TOTP снят, single-factor (ed25519 + сертификат).** У ноды нет публичного IP, единственный путь входа — через `fbsd-1-sel` (jump-host), на котором TOTP уже стоит. Двойной TOTP на цепочке избыточен. Защита ноды — пара ed25519-ключ + сертификат CA с TTL 8h. Tradeoff сознательный: компрометация ключа на ноуте = вход на fbsd-2-sel, но без TOTP-приложения. Если позже захочется жёстче — добавим `from="172.16.0.2"` в `AuthorizedPrincipalsFile` (только с jump-host'а); для учётки `zfs-repl` это уже сделано.
 - **2026-08-30 — fbsd-2-sel: только приватный IP, jump-host через fbsd-1-sel.** Экономит ~150–200 ₽/мес на публичном IP, ZFS-реплика и сервисный SSH идут по `172.16.0.0/16` (быстрее, без публичного egress). Минус: в случае падения fbsd-1-sel нужно лезть в панель Selectel, чтобы попасть на fbsd-2-sel напрямую — для Фазы 1 приемлемо, в Фазе 3 (CARP) — будет решена через VIP.
@@ -231,6 +249,28 @@ default            172.16.0.1         UGS         vtnet0
 - **2026-09-06 — Selectel edge отвечает SYN/ACK на любой порт публичного IP (anti-scan / port knocking).** При `nmap -Pn -p 1-1024 178.72.xxx.xxx` показывает 1024 open порта, хотя реально на ноде открыт только 22/tcp. Подтверждается тем, что `telnet 21` подключается, но `pfctl -ss` показывает только ssh/ntp-коннекты, ftp-демон не установлен, в `services` ничего сверх sshd не запущено. **Реальный state проверять через приватный IP** (`ssh -J fbsd-1-sel ... nmap -sS 172.16.0.2`) или `nmap -sA` (ACK-сканирование, показывает filtered/unfiltered вместо open). В Selectel-документации это «защита от сканирования». В проде, если захочется реальный nmap снаружи, можно попросить Selectel отключить (обычно платная опция) — для нашего кейса не блокер.
 - **2026-10-08 — `authorized_keys` не применяется при входе по сертификату.** Ограничения (`from=`, `command=`, `no-*`), прописанные в `/home/zfs-repl/.ssh/authorized_keys`, **не срабатывают**, если клиент предъявляет сертификат вместо «голого» ключа. Наблюдение: с сертификатом в логе `Sending command: id` (принудительная команда не подменилась), а стоило убрать сертификат — те же ограничения отработали как надо. Причина: при аутентификации по сертификату sshd ищет опции **по ключу CA**, а не по публичному ключу пользователя; строка с пользовательским ключом как источник опций просто не читается. **Решение:** директива `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` + файл `/etc/ssh/auth_principals/zfs-repl`, где ограничения привязаны к principal'у, а не к ключу.
 - **2026-10-08 — `force-command` требует реальный шелл, `nologin` его ломает.** sshd выполняет `force-command` через login-shell пользователя. С `/sbin/nologin` сессия завершается «This account is currently not available» и принудительная команда не запускается. У `zfs-repl` шелл `/bin/sh`, запрет интерактивного входа обеспечивается `no-pty` и подменой команды. Второй эффект: `scp`/`sftp` под этой учёткой тоже не работают (им нужен шелл и Subsystem), что для сервисной реплики является плюсом.
+- **2026-10-11 — `force-command` ПОДМЕНЯЕТ команду клиента целиком, а не дополняет её.** Это главный грабль репликации. Ошибка выглядит так:
+
+  ```sh
+  zfs send zroot/tank/data@repl-1 | ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 sudo /sbin/zfs receive -F zroot/tank/repl
+  # cannot receive new filesystem stream: permission denied
+  ```
+
+  Клиент отправил команду `sudo /sbin/zfs receive -F zroot/tank/repl`, но sshd на replica её **вообще не выполнил** — он запустил свою, из `command="..."`. Причина ошибки в том, что выполнялась подставленная команда, запущенная **не от root** (учётка `zfs-repl` без sudo-прав), а ZFS-права на приём ещё не были выданы. Правильная форма — **после адреса узла не писать ничего**:
+
+  ```sh
+  zfs send zroot/tank/data@repl-1 | ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4
+  ```
+
+  Побочный вывод: отлаживать такие ошибки через клиентскую команду бесполезно — sshd её не покажет в логе и не выполнит. Смотрите `command="..."` в `auth_principals/zfs-repl` на replica.
+- **2026-10-11 — в BSD `sort` нет `-V`, а лексикографическая сортировка путает номера снапшотов.** Скрипт репликации выбирает последний снапшот по имени вида `zroot/tank/data@repl-N`. Очевидное `sort -V | tail -1` не работает: в `sort` из FreeBSD base такой опции нет (это GNU-расширение), а обычная сортировка расставит `repl-10` раньше `repl-2`, и скрипт возьмёт не тот снапшот — сломанная цепочка инкрементов и ошибка на replica. Решение — сортировать средствами самого ZFS:
+
+  ```sh
+  zfs list -t snapshot -H -s creation -o name -d 1 -r "$DATASET"
+  ```
+
+  Флаг `-s creation` сортирует по времени создания, `-d 1` ограничивает глубину (иначе попадут снапшоты вложенных датасетов вроде клона).
+- **2026-10-11 — в `zfs allow` для приёма потока не хватает одного `receive`.** Минимальный набор прав, который реально работает: `compression,mountpoint,mount,create,receive`. `receive` даёт право принять поток, `create` — создать вложенные датасеты (снапшоты приходят как отдельные объекты), `mount` и `mountpoint` — смонтировать результат. Выдать только `receive` не хватит: `zfs receive -F` упадёт на попытке создать снапшот внутри приёмника.
 
 
 ## Метрики
@@ -239,10 +279,10 @@ default            172.16.0.1         UGS         vtnet0
 
 ## Артефакты
 
-- [phase-1-zfs-report.md](./phase-1-zfs-report.md) — **создан 2026-09-13**, раздел «Структура zpool» заполнен; разделы Snapshot/Rollback, Encryption, Репликация, Failover — по мере прохождения дней
+- [phase-1-zfs-report.md](./phase-1-zfs-report.md) — **актуально на 2026-10-11**: разделы «Структура zpool», «Snapshot/Rollback/Clone», «Encryption с keyfile», «Репликация fbsd-1-sel → fbsd-2-sel»; раздел Failover — День 3
 - [pf-ruleset.conf](./pf-ruleset.conf) — **v2, актуальный**, единый ruleset для обеих нод
-- [zfs-replication.sh](./zfs-replication.sh) — скрипт репликации (Неделя 3)
-- [service-ssh-setup.md](./service-ssh-setup.md) — **создан 2026-10-08**: сервисная учётка `zfs-repl`, ограничения в `AuthorizedPrincipalsFile`, тесты
+- [zfs-replication.sh](./zfs-replication.sh) — **создан 2026-10-11**, POSIX sh, запуск от root на master; первая отправка полная, далее инкремент
+- [service-ssh-setup.md](./service-ssh-setup.md) — **актуально на 2026-10-11**: сервисная учётка `zfs-repl`, ограничения в `AuthorizedPrincipalsFile`, права через `zfs allow` (без sudo), тесты
 
 ## Что дальше
 

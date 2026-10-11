@@ -215,8 +215,21 @@ zfs send -i tank/data@for-replication tank/data@incremental | ssh root@backup "z
 # Ежедневная репликация
 zfs snapshot tank/data@$(date +%Y-%m-%d)
 LATEST=$(zfs list -t snapshot -H -o name | grep "tank/data" | tail -1)
-zfs send -i tank/data@previous $LATEST | ssh -i /root/.ssh/zfs-repl zfs-repl@backup "zfs receive tank/remote-data"
+zfs send -i tank/data@previous $LATEST | ssh -i /root/.ssh/zfs_repl zfs-repl@backup
 ```
+
+> **Внимание, если на приёмнике настроен `force-command`.** Примеры выше подразумевают
+> обычный SSH-вход, где клиент сам указывает удалённую команду. Если приёмная учётка
+> ограничена `command="... zfs receive ..."` в `AuthorizedPrincipalsFile`, то команда
+> после адреса узла **игнорируется** — sshd подставляет свою. Правильная форма в этом
+> случае — оставить только адрес:
+>
+> ```bash
+> zfs send tank/data@snap | ssh -i /root/.ssh/zfs_repl zfs-repl@backup
+> ```
+>
+> Имя приёмного датасета при этом берётся из `force-command`, а не от клиента.
+> Подробнее: `service-ssh-setup.md` и «Грабли» в `README.md`.
 
 **Сжатие при передаче:**
 ```bash

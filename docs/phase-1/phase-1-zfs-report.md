@@ -172,11 +172,144 @@ sudo zfs create \
 - Шифрование в ZFS — **нативное (не LUKS)**. ZFS держит свои ключи в собственных метаданных, шифрует на уровне dataset'а (не пула). Если хочешь «всё шифровать» — нужно шифровать каждый dataset отдельно (или шифровать только нужные).
 - zfs send **с зашифрованного dataset'а**. По умолчанию zfs send шлёт расшифрованные данные в поток. Если реплика идёт по недоверенной сети — нужно -w (raw send, шлёт зашифрованные блоки, расшифровка происходит на принимающей стороне). Для нашего случая (Selectel приватная сеть) raw не критично, но в Фазе 3 напомню.
 - **Ключ в** etc/zfs/keys/ и rc.conf. Сейчас ничего в rc.conf менять не надо — ZFS сам читает keylocation из свойств dataset'а при импорте. Если бы хотели ключ на USB — было бы keylocation=prompt (passphrase при загрузке) или keylocation=file:///media/usb/... (зависит от того, успеет ли USB примонтироваться).
-- **Импорт пула на другой машине** (например, восстановление из бэкапа в Selectel) — без tank-secure.key dataset не поднимется, данные будут видны как «encrypted, key unavailable». Поэтому бэкап ключа в 1Password критичен.
+- **Импорт пула на другой машине** (например, восстановление из бэкапа в Selectel) — без tank-secure.key dataset не поднимется, данные будут видны как «encrypted, key unavailable». Поэтому бэкап ключа в password manager (KeePassXC) критичен.
 - zpool import без zfs load-key отдельно. С keylocation=file:// ничего делать не надо — ZFS сам загружает ключ. С keylocation=prompt пришлось бы вручную zfs load-key zroot/tank/secure перед mount.
 
-## Репликация `fbsd-1-sel → fbsd-2-sel`
-*(заполним в Неделе 3)*
+---
+
+## Репликация `fbsd-1-sel → fbsd-2-sel` (День 2 Недели 3, 2026-10-10 — 2026-10-11)
+
+**Master:** fbsd-1-sel (172.16.0.2), источник — `zroot/tank/data`
+**Replica:** fbsd-2-sel (172.16.0.4), приёмник — `zroot/tank/repl`
+**Канал:** приватная сеть Selectel `172.16.0.0/16`, без выхода в интернет
+
+### Схема
+
+```mermaid
+graph LR
+    subgraph M["fbsd-1-sel · master · 172.16.0.2"]
+        SRC["<b>zroot/tank/data</b><br/>снапшоты @repl-1 … @repl-4"]
+        KEY["/root/.ssh/zfs_repl<br/>ed25519 + cert (principal=zfs-repl)"]
+        SEND["<b>zfs send</b><br/>первый раз полный,<br/>далее -i PREV LATEST"]
+        SRC --> SEND
+        KEY --> SEND
+    end
+
+    subgraph R["fbsd-2-sel · replica · 172.16.0.4"]
+        AUTH["auth_principals/zfs-repl<br/>from=172.16.0.2<br/>force-command"]
+        ALLOW["zfs allow -u zfs-repl<br/>receive, create, mount,<br/>mountpoint, compression"]
+        RECV["<b>zfs receive -F</b><br/>zroot/tank/repl"]
+        DST["<b>zroot/tank/repl</b><br/>данные + снапшоты"]
+        AUTH --> RECV
+        ALLOW --> RECV
+        RECV --> DST
+    end
+
+    SEND ==>|ssh, поток ZFS<br/>по 172.16.0.0/16| AUTH
+```
+
+Replica — **passive**: она не опрашивает master, не хранит состояние репликации и не
+решает, что принимать. Всё, что она делает, определяется командой, которую подставляет
+`force-command`. Поток приходит по stdin уже после того, как sshd подменил команду.
+
+### Что делал (по шагам)
+
+1. На `fbsd-2-sel` завёл родительский датасет `zroot/tank` — точка, в которую
+   принимается поток
+2. Выдал `zfs-repl` права на приём, без выдачи root:
+
+   ```sh
+   sudo zfs allow -u zfs-repl compression,mountpoint,mount,create,receive zroot/tank/repl
+   ```
+
+3. Сгенерировал `zfs send` | `ssh` — первый запуск упал с `permission denied`
+   (грабли №1 ниже), после исправления формата команды полный поток принялся
+4. Написал `zfs-replication.sh`: первый запуск — полный поток, дальше — инкремент
+5. Прогнал 4 итерации, каждый раз добавляя файлы перед новым снапшотом, чтобы
+   проверить и полную, и инкрементальную ветки
+
+### Первый приём — полный поток
+
+На master:
+
+```sh
+zfs snapshot zroot/tank/data@repl-1
+zfs send zroot/tank/data@repl-1 | ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4
+```
+
+Обратите внимание: после адреса узла **нет** никакой команды. Это принципиально —
+см. «Грабли» №1.
+
+### Инкременты
+
+На master, для каждой следующей итерации:
+
+```sh
+echo "payload" > /zroot/tank/data/batch2-6.txt
+zfs snapshot zroot/tank/data@repl-2
+zfs send -i zroot/tank/data@repl-1 zroot/tank/data@repl-2 \
+    | ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4
+```
+
+Инкременты с `-i` приходят на **тот же** `zroot/tank/repl`, потому что имя приёмника
+зашито в `force-command`, а не приходит от клиента.
+
+### Результат на replica
+
+```
+avalok11@fbsd-2-sel:~ $ zfs list -t all -o name,used,mountpoint | grep repl
+zroot/tank/repl                             304K  /zroot/tank/repl
+zroot/tank/repl@repl-1                       56K  -
+zroot/tank/repl@repl-2                       64K  -
+zroot/tank/repl@repl-3                       64K  -
+zroot/tank/repl@repl-4                        0B  -
+```
+
+Содержимое приёмника — 4 батча тестовых файлов, созданных на master между снапшотами:
+
+```
+avalok11@fbsd-2-sel:~ $ ls -l /zroot/tank/repl
+-rw-r--r--  1 root wheel 30 Oct 10 14:41 batch-1.txt
+-rw-r--r--  1 root wheel 30 Oct 10 14:41 batch-2.txt
+-rw-r--r--  1 root wheel 30 Oct 10 14:41 batch-3.txt
+-rw-r--r--  1 root wheel 30 Oct 10 14:41 batch-4.txt
+-rw-r--r--  1 root wheel 30 Oct 10 14:41 batch-5.txt
+-rw-r--r--  1 root wheel 30 Oct 10 15:52 batch2-6.txt
+-rw-r--r--  1 root wheel 30 Oct 10 15:52 batch2-7.txt
+-rw-r--r--  1 root wheel 30 Oct 10 15:52 batch2-8.txt
+-rw-r--r--  1 root wheel 31 Oct 11 17:48 batch3-9.txt
+-rw-r--r--  1 root wheel 31 Oct 11 17:48 batch3-10.txt
+-rw-r--r--  1 root wheel 31 Oct 11 17:48 batch3-11.txt
+-rw-r--r--  1 root wheel 31 Oct 11 20:35 batch4-12.txt
+-rw-r--r--  1 root wheel 31 Oct 11 20:35 batch4-13.txt
+-rw-r--r--  1 root wheel 31 Oct 11 20:35 batch4-14.txt
+```
+
+Размеры снапшотов ведут себя предсказуемо: `repl-1` (56K) — полный поток, дальше дельты
+(64K, 64K, 0B — последний снапшот ничего не менял, только зафиксировал состояние).
+Всего 14 файлов = 5 + 3 + 3 + 3 по батчам.
+
+`used` на приёмнике (304K) больше, чем на источнике, хотя данные те же: приёмник
+получает собственные метаданные и снапшоты в своём счётчике. Сравнивать `used` между
+master и replica бессмысленно — сравнивают список файлов и целостность потока.
+
+### Что НЕ делал
+
+- Failover (День 3): остановка master через панель Selectel и проверка читаемости
+  приёмника
+- `zpool scrub` на обеих нодах (День 3)
+- Автоматизация через cron (Фаза 4, Ansible)
+- Сжатие и шифрование самого потока (`-w` для raw send) — по приватной сети Selectel
+  избыточно
+
+### Решения
+
+- **2026-10-11 — маркер прогресса лежит на master (`/var/db/zfs-replication/last-snapshot`), replica не опрашивается.** При `force-command` любой запрос к replica превращается в `zfs receive` — вернуть список снапшотов физически нечем. Вариант «stateful + query» (отдельный административный канал, через который master спрашивает у replica последний принятый снапшот) отложен на будущее. Для нашего объёма (десятки килобайт) ошибка маркера не приводит к потере данных: худший случай — лишний полный поток.
+- **2026-10-11 — датасет-приёмник называется `zroot/tank/repl`, а не `tank/repl`.** Имя в `force-command` пишется от корня пула. Короткое имя `tank/repl` в команде на replica не резолвилось, приём падал с `cannot receive new filesystem stream`.
+- **2026-10-11 — права на приём выданы через `zfs allow`, sudoers-правило удалено.** `zfs allow -u zfs-repl compression,mountpoint,mount,create,receive zroot/tank/repl` даёт учётке ровно те операции, которые нужны для приёма потока, и только на одном датасете. sudoers-правило давало бы полноценный root — при обходе `force-command` это превратилось бы в полный захват replica.
+- **2026-10-11 — приватный ключ `zfs-repl` лежит на master, а не на ноутбуке.** Причина техническая: `from="172.16.0.2"` пропускает соединения только с master, поэтому запуск репликации с Mac M4 был бы отклонён. Побочная выгода — при потере ноутбука репликация по расписанию продолжает работать.
+
+---
 
 ## Failover
-*(заполним в Неделе 3)*
+*(заполним в День 3 Недели 3)*

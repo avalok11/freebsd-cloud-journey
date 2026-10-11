@@ -382,8 +382,10 @@ graph TB
 7. **Настройка сервисного ssh-доступа для ZFS replication:**
    - Создать пользователя `zfs-repl` с шеллом `/bin/sh` (`nologin` не подходит: `force-command` выполняется через login-shell).
    - Сгенерировать отдельный ed25519-ключ, подписать через `fbsd-ca-sel` с principal `zfs-repl`.
-   - Включить `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` и создать `/etc/ssh/auth_principals/zfs-repl` с ограничениями: `from="172.16.0.2",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl`.
+   - Включить `AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u` и создать `/etc/ssh/auth_principals/zfs-repl` с ограничениями: `from="172.16.0.2",command="/usr/bin/env /sbin/zfs receive -F zroot/tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl`.
+   - Права на приём выдать через `zfs allow -u zfs-repl compression,mountpoint,mount,create,receive zroot/tank/repl` — без sudoers и без root на replica.
    - `authorized_keys` для этой учётки не создаём — иначе отзыв сертификата обходится входом по «голому» ключу.
+   - Приватный ключ хранить на master (`/root/.ssh/zfs_repl`), а не на ноутбуке: `from="172.16.0.2"` не пустит подключение с другого адреса.
    - Проверить: с других хостов ключ не принимается, с правильного — работает только `zfs receive`.
 
 **Решения по стенду (фиксирую до старта):**

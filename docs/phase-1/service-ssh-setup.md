@@ -1,7 +1,7 @@
 # Сервисная SSH-учётка `zfs-repl`
 
 Используется для ZFS-репликации `fbsd-1-sel → fbsd-2-sel`. Принимает только одну команду
-(`zfs receive`) и только с IP master-ноды. Интерактивного шелла нет.
+(`zfs receive`) и только с IP master-ноды. Интерактивного шелла нет, `sudo` не требуется.
 
 ## Параметры пользователя
 
@@ -11,6 +11,7 @@
 | home | `/home/zfs-repl` |
 | shell | `/bin/sh` |
 | comment | "ZFS replication service account" |
+| авторизация | ed25519-ключ + сертификат CA (principal=`zfs-repl`), TOTP **не используется** |
 
 > **Почему шелл, а не `/sbin/nologin`.** `force-command` sshd выполняет **через login-shell**
 > пользователя. С `/sbin/nologin` принудительная команда не запустится вообще — сессия
@@ -22,9 +23,15 @@
 ## Ключ и сертификат
 
 - Тип: ed25519
-- Приватный ключ: `~/.ssh/zfs_repl` на Mac M4, chmod 600
-- Публичный ключ: `~/.ssh/zfs_repl.pub`
-- Сертификат: `~/.ssh/zfs_repl-cert.pub` (подписан `fbsd-ca-sel`, principal=`zfs-repl`, TTL 52w)
+- Приватный ключ: **`/root/.ssh/zfs_repl` на fbsd-1-sel** (master), chmod 600
+- Публичный ключ: `/root/.ssh/zfs_repl.pub`
+- Сертификат: `/root/.ssh/zfs_repl-cert.pub` (подписан `fbsd-ca-sel`, principal=`zfs-repl`, TTL 52w)
+
+> **Почему ключ на master, а не на ноутбуке.** Ограничение `from="172.16.0.2"` разрешает
+> вход только с master-ноды. Если хранить приватный ключ на Mac M4 и запускать репликацию
+> оттуда, replica отклонит подключение — исходящий адрес ноутбука не `172.16.0.2`.
+> Репликацию запускает master; это и есть production-подобная схема: в случае потери
+> ноутбука реплика продолжает работать по расписанию.
 
 ## Настройка `/etc/ssh/sshd_config.d/ca.conf` на fbsd-2-sel
 
@@ -41,7 +48,7 @@ AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u
 ## `/etc/ssh/auth_principals/zfs-repl` на fbsd-2-sel
 
 ```sh
-from="172.16.0.2",command="/usr/bin/env zfs receive -F tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl
+from="172.16.0.2",command="/usr/bin/env /sbin/zfs receive -F zroot/tank/repl",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty zfs-repl
 ```
 
 Формат строки — как в `authorized_keys`, но **в конце вместо публичного ключа стоит имя
@@ -56,12 +63,36 @@ sudo chown root:wheel /etc/ssh/auth_principals/zfs-repl
 | Опция | Зачем |
 |---|---|
 | `from="172.16.0.2"` | только с fbsd-1-sel (master) |
-| `command="/usr/bin/env zfs receive -F tank/repl"` | единственная разрешённая команда |
+| `command="/usr/bin/env /sbin/zfs receive -F zroot/tank/repl"` | единственная разрешённая команда |
 | `no-port-forwarding` | нельзя использовать как SOCKS-прокси |
 | `no-X11-forwarding` | не запрашивает X11 |
 | `no-agent-forwarding` | нельзя прокинуть ssh-agent |
 | `no-pty` | не выделяет псевдо-терминал |
 | `zfs-repl` | principal, к которому применяются все опции выше |
+
+Обратите внимание: имя датасета в `force-command` — `zroot/tank/repl`, то есть полный
+путь от корня пула. Ранние версии плана Фазы 1 указывали `tank/repl`, что не совпадало
+с фактической иерархией и приводило к ошибке `cannot receive new filesystem stream`.
+
+## Права на приём: `zfs allow`, а не sudo
+
+На replica учётке `zfs-repl` выданы ZFS-права ровно на один датасет:
+
+```sh
+sudo zfs allow -u zfs-repl compression,mountpoint,mount,create,receive zroot/tank/repl
+```
+
+Этого достаточно, чтобы `zfs receive -F zroot/tank/repl` отработал от имени самого
+`zfs-repl`. Права `create` и `mount` нужны потому, что при приёме потока ZFS создаёт
+вложенные датасеты (снапшоты, клоны) и монтирует результат.
+
+| Механизм | Даёт учётке | Итог |
+|---|---|---|
+| `sudoers`-правило `zfs-repl ALL=(root) NOPASSWD: /sbin/zfs receive *` | полноценный root на время команды | лишний: всякое `sudo` на этой учётке — дыра |
+| `zfs allow` (используется) | операции **только** с `zroot/tank/repl` | принцип наименьших привилегий соблюдён |
+
+sudoers-правило было создано на старте, но при переходе на `zfs allow` **удалено**.
+Фактический способ повышения прав — механизм делегирования ZFS, а не sudo.
 
 ## Почему ограничения лежат здесь, а не в `authorized_keys`
 
@@ -104,14 +135,24 @@ ssh -i ~/.ssh/freebsd_lab-cert avalok11@fbsd-ca-sel.lab.sel \
 Ограничения при этом **не меняются** — они живут в `auth_principals/zfs-repl` на сервере,
 а не в сертификате. Это одно из преимуществ выбранной схемы: смена ограничений — правка
 одного файла на сервере, без переподписи и без перекладывания сертификата на клиент.
+После переподписи новый `-cert.pub` копируется на master в `/root/.ssh/`.
 
 ## Тесты
 
-| # | Команда (с Mac M4) | Ожидаемый результат |
+| # | Команда | Ожидаемый результат |
 |---|---|---|
-| 1 | `ssh -i ~/.ssh/zfs_repl-cert zfs-repl@<ip> id` без `-J` | `Permission denied` — `from="172.16.0.2"` не совпал с IP Mac M4 |
-| 2 | `ssh -v -i ~/.ssh/zfs_repl-cert -J fbsd-1-sel zfs-repl@<ip> id` | в логе `Remote: auth_principals:zfs-repl: key options: ... command no-pty` и `Sending command: /usr/bin/env zfs receive -F tank/repl` — команда `id` подменена |
-| 3 | то же + `-J fbsd-1-sel` и команда `ls /tmp` | та же подмена на `zfs receive`, вывода списка файлов нет |
+| 1 | `sudo ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id` с master | команда `id` подменена на `zfs receive`; интерактивного шелла нет |
+| 2 | `sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id 2>&1 \| grep -E 'Sending command\|Authenticated'` с master | в логе `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl` |
+| 3 | подключение с Mac M4 без `-J` | `Permission denied` — `from="172.16.0.2"` не совпал с адресом ноутбука |
+
+> **Тесты 1–2 запускаются с master и от root.** Ключ лежит в `/root/.ssh/`, обычному
+> пользователю файл не читается, и `ssh` падает на чтении ключа — до установки
+> соединения. Из-под обычного пользователя с ключом в `/root/.ssh/` grep не находит
+> ничего: это не проблема доступа, а просто нечитаемый ключ.
+
+Отдельно стоит проверить, что вход с другого адреса отвергается: `zfs receive` не должен
+работать при подключении не с `172.16.0.2`. Это проверяется с Mac M4 напрямую
+(без `-J`).
 
 ## Защита в глубину
 
@@ -119,5 +160,6 @@ ssh -i ~/.ssh/freebsd_lab-cert avalok11@fbsd-ca-sel.lab.sel \
 2. Сертификат подписан CA, principal=`zfs-repl` — без подписи CA ключ не примут
 3. `from="172.16.0.2"` — вход только с master-ноды
 4. `force-command` — только `zfs receive`, любую команду клиента подменяет
-5. `no-port/X11/agent-forwarding`, `no-pty` — ssh-сессию не превратить в туннель или шелл
-6. `authorized_keys` отсутствует — отзыв сертификата реально отключает доступ
+5. `zfs allow` вместо sudo — даже при обходе `force-command` учётка не станет root
+6. `no-port/X11/agent-forwarding`, `no-pty` — ssh-сессию не превратить в туннель или шелл
+7. `authorized_keys` отсутствует — отзыв сертификата реально отключает доступ
