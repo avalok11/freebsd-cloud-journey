@@ -20,7 +20,7 @@
   - **`NN-тема.md`** — короткие теоретические заметки (3–15 минут чтения) по темам данной фазы. Без воды, с привязкой к нашему стеку и сравнением с Linux.
   - **`README.md`** — отчёт по фазе: что сделано, что получилось, грабли, графики, выводы.
 
-**Чего здесь НЕТ:** реальных конфигов инфраструктуры, IP-адресов, доменов, сертификатов. Всё это живёт в приватном репозитории `infra-configs` в Gitea внутри кластера.
+**Чего здесь НЕТ:** реальных конфигов инфраструктуры, доменов и сертификатов. Публичные IP замазаны, приватные адреса стенда показаны как есть — это номера внутри RFC 1918 (`172.16.0.0/16`, `192.168.64.0/24`), они не маршрутизируются в интернете и ничего не раскрывают. Всё остальное живёт в приватном репозитории `infra-configs` в Gitea внутри кластера.
 
 ## Стек
 
@@ -56,7 +56,7 @@
 - [`docs/roadmap.md`](./docs/roadmap.md) — полный план по фазам
 - [`docs/architecture.md`](./docs/architecture.md) — диаграмма целевой архитектуры
 
-### Фаза 0.1 — SSH Certificate Authority (мини-CA) (в работе)
+### Фаза 0.1 — SSH Certificate Authority (мини-CA) (завершена)
 
 - [`docs/phase-0.1/README.md`](./docs/phase-0.1/README.md) — план и чек-листы по настройке мини-CA на `fbsd-ca-sel` (отдельная нода в Selectel)
 
@@ -70,6 +70,22 @@
 - [`docs/phase-0/06-hybrid-stand.md`](./docs/phase-0/06-hybrid-stand.md) — почему ноутбук не часть кластера, динамический IP не баг
 
 ### Фаза 1 — FreeBSD актуальный: сеть, ZFS, базовый сервисный SSH (в работе)
+
+**Отчёт по фазе** — доступ, безопасность, структура стенда, решения:
+
+- [`docs/phase-1/README.md`](./docs/phase-1/README.md) — чеклисты, план по дням, ключевые решения, грабли
+
+**Технические детали и механизмы ZFS** — команды, реальный вывод, параметры:
+
+- [`docs/phase-1/phase-1-zfs-report.md`](./docs/phase-1/phase-1-zfs-report.md) — пулы и датасеты, снапшоты, шифрование, репликация, failover
+
+**Артефакты:**
+
+- [`docs/phase-1/service-ssh-setup.md`](./docs/phase-1/service-ssh-setup.md) — сервисная учётка `zfs-repl`: ограничения в `AuthorizedPrincipalsFile`, права через `zfs allow`, тесты
+- [`docs/phase-1/zfs-replication.sh`](./docs/phase-1/zfs-replication.sh) — скрипт репликации (POSIX sh, запуск от root на master)
+- [`docs/phase-1/pf-ruleset.conf`](./docs/phase-1/pf-ruleset.conf) — единый PF ruleset для обеих нод
+
+**Теоретические заметки:**
 
 - [`docs/phase-1/01-network-stack.md`](./docs/phase-1/01-network-stack.md) — сетевой стек FreeBSD vs Linux: ifconfig vs ip, netstat vs ss, rc.conf
 - [`docs/phase-1/02-pf-vs-iptables.md`](./docs/phase-1/02-pf-vs-iptables.md) — PF vs iptables/nftables, история, синтаксис

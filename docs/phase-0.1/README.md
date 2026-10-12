@@ -1,6 +1,6 @@
 # Фаза 0.1 — SSH Certificate Authority (мини-CA)
 
-**Статус:** в работе
+**Статус:** завершена (все пункты чек-листа закрыты)
 **Период:** август 2026
 **Цель фазы:** поднять мини-CA на `fbsd-ca-sel` со структурированным хранением ключей, подписать пользовательские и хостовые ключи, настроить доверие на всех нодах, написать скрипты подписи и отзыва.
 
@@ -98,7 +98,7 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 7. **Подписать твой ключ** (с Mac M4):
    ```bash
    scp ~/.ssh/freebsd_lab.pub fbsd-ca-sel:/tmp/
-   ssh fbsd-ca-sel "/usr/local/sshca/scripts/sign-user-cert.sh /tmp/freebsd_lab.pub avalok11,root +8h:00"
+   ssh fbsd-ca-sel "/usr/local/sshca/scripts/sign-user-cert.sh /tmp/freebsd_lab.pub avalok11,root +8h:00 avalok11"
    scp fbsd-ca-sel:/usr/local/sshca/users/avalok11/freebsd_lab-cert.pub ~/.ssh/
    ```
 8. **Скрипт подписи host-ключей** и подписать `fbsd-1-sel`, `fbsd-arm`.
@@ -122,8 +122,16 @@ SSH CA в плане стояла в Фазе 8 (продуктовый паке
 ```bash
 #!/bin/sh
 # Подписать пользовательский публичный ключ.
-# Использование: sign-user-cert.sh <pubkey> <principals> [ttl]
-# Пример: sign-user-cert.sh /tmp/key.pub avalok11,root +8h:00
+# Использование: sign-user-cert.sh <pubkey> <principals> [ttl] [storage-user]
+# Пример: sign-user-cert.sh /tmp/key.pub avalok11,root +8h:00 avalok11
+#
+# <principals>     — список логинов в самом сертификате (ssh-keygen -n)
+# [storage-user]   — имя каталога в /usr/local/sshca/users/, по умолчанию
+#                    basename публичного ключа без .pub
+#
+# Скрипт НЕинтерактивный: раньше здесь был `read` с вопросом «Для какого
+# пользователя подписываем?». На EOF (cron, Ansible, CI) `read` возвращает
+# не-nonzero, и `set -e` ронял скрипт. Имя каталога передаётся аргументом.
 
 set -e
 
@@ -133,8 +141,8 @@ TTL=${3:-"+8h:00"}
 CA_DIR="/usr/local/sshca"
 
 if [ -z "$PUBKEY" ] || [ -z "$PRINCIPALS" ]; then
-    echo "Использование: $0 <pubkey> <principals> [ttl]"
-    echo "Пример: $0 /tmp/key.pub avalok11,root +8h:00"
+    echo "Использование: $0 <pubkey> <principals> [ttl] [storage-user]"
+    echo "Пример: $0 /tmp/key.pub avalok11,root +8h:00 avalok11"
     exit 1
 fi
 
@@ -143,12 +151,9 @@ if [ ! -f "$PUBKEY" ]; then
     exit 1
 fi
 
-# Извлечь имя пользователя из пути (последний компонент без .pub)
+# Имя ключа из пути (последний компонент без .pub)
 KEYNAME=$(basename "$PUBKEY" .pub)
-# Спросить у пользователя, для кого подписываем
-echo "Для какого пользователя подписываем? (по умолчанию: $KEYNAME)"
-read -r USERNAME
-USERNAME=${USERNAME:-$KEYNAME}
+USERNAME=${4:-"$KEYNAME"}
 
 USER_DIR="$CA_DIR/users/$USERNAME"
 mkdir -p "$USER_DIR"

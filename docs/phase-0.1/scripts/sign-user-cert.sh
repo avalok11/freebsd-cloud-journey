@@ -1,7 +1,15 @@
 #!/bin/sh
 # Подписать пользовательский публичный ключ.
-# Использование: sign-user-cert.sh <pubkey> <principals> [ttl]
+# Использование: sign-user-cert.sh <pubkey> <principals> [ttl] [storage-user]
 # Пример: sign-user-cert.sh /tmp/key.pub avalok11,root +8h:00
+#
+# <principals>     — список логинов в самом сертификате (ssh-keygen -n)
+# [storage-user]   — имя каталога в /usr/local/sshca/users/, по умолчанию
+#                    basename публичного ключа без .pub
+#
+# Скрипт НЕинтерактивный: раньше здесь был `read` с вопросом «Для какого
+# пользователя подписываем?». На EOF (cron, Ansible, CI) `read` возвращает
+# не-nonzero, и `set -e` ронял скрипт. Имя каталога и передаётся аргументом.
 
 set -e
 
@@ -11,7 +19,7 @@ TTL=${3:-"+8h"}
 CA_DIR="/usr/local/sshca"
 
 if [ -z "$PUBKEY" ] || [ -z "$PRINCIPALS" ]; then
-    echo "Использование: $0 <pubkey> <principals> [ttl]"
+    echo "Использование: $0 <pubkey> <principals> [ttl] [storage-user]"
     echo "Пример: $0 /tmp/key.pub avalok11,root +8h:00"
     exit 1
 fi
@@ -21,13 +29,9 @@ if [ ! -f "$PUBKEY" ]; then
     exit 1
 fi
 
-# Извлечь имя ключа из пути (последний компонент без .pub)
+# Имя ключа из пути (последний компонент без .pub)
 KEYNAME=$(basename "$PUBKEY" .pub)
-
-# Спросить у пользователя, для кого подписываем
-echo "Для какого пользователя подписываем? (по умолчанию: $KEYNAME)"
-read -r USERNAME
-USERNAME=${USERNAME:-$KEYNAME}
+USERNAME=${4:-"$KEYNAME"}
 
 USER_DIR="$CA_DIR/users/$USERNAME"
 mkdir -p "$USER_DIR"

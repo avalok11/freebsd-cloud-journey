@@ -129,8 +129,15 @@ sudoers-правило было создано на старте, но при п
 
 ```sh
 ssh -i ~/.ssh/freebsd_lab-cert avalok11@fbsd-ca-sel.lab.sel \
-    "sudo /usr/local/sshca/scripts/sign-user-cert.sh /tmp/zfs_repl.pub zfs-repl +52w"
+    "sudo /usr/local/sshca/scripts/sign-user-cert.sh /tmp/zfs_repl.pub zfs-repl +52w zfs-repl"
 ```
+
+> `fbsd-ca-sel` имеет публичный IP — `-J fbsd-1-sel` не нужен, вход с Mac M4 прямой.
+> Четвёртый аргумент скрипта (`zfs-repl`) — имя каталога в
+> `/usr/local/sshca/users/`, куда CA кладёт ключ и сертификат. Он должен совпадать с
+> уже созданным каталогом, иначе получится вторая копия сертификата в другом месте.
+> Скрипт неинтерактивный: раньше он спрашивал имя каталога через `read`, что ломало
+> его работу из cron и Ansible.
 
 Ограничения при этом **не меняются** — они живут в `auth_principals/zfs-repl` на сервере,
 а не в сертификате. Это одно из преимуществ выбранной схемы: смена ограничений — правка

@@ -7,7 +7,7 @@
 ```mermaid
 graph TB
     subgraph Laptop["Mac M4 — рабочая станция админа"]
-        Console["Ansible-консоль<br/>ssh-keys + сертификаты<br/>~/.ssh/freebsd_lab + zfs_repl"]
+        Console["Ansible-консоль<br/>ssh-keys + сертификаты<br/>~/.ssh/freebsd_lab"]
         GH["freebsd-cloud-journey<br/>GitHub, публичный<br/>github.com/avalok11/..."]
     end
 
@@ -32,7 +32,7 @@ graph TB
     Console -->|"ssh по ключу"| DARM
     Console -->|"git push"| GH
     CA -. "подписывает user-ключи" .-> Console
-    CA -. "подписывает user-ключи (zfs-repl, ограничения в auth_principals)" .-> Console
+    CA -. "подписывает ключ репликации zfs_repl" .-> F1
     CA -. "подписывает host-ключи" .-> F1
     CA -. "подписывает host-ключи" .-> F2
     CA -. "подписывает host-ключи" .-> FARM
@@ -60,7 +60,7 @@ graph TB
 | Нода | Хостнейм | ОС | Внешний IP | Внутренний IP | Назначение | Статус |
 |---|---|---|---|---|---|---|
 | **fbsd-1-sel** | `fbsd-1-sel.lab.sel` | FreeBSD 15.1-RELEASE amd64 | `178.72.xxx.xxx` (замазан) | `172.16.0.2/16` (vtnet0) | Шлюз, тест-нода, jump-host | **активен**, sshguard + TOTP + CA-доверие |
-| **fbsd-ca-sel** | `fbsd-ca-sel.lab.sel` | FreeBSD 15.1-RELEASE amd64 | (jump через F1) | `172.16.0.3/16` (vtnet0) | Мини-CA, только sshd | **активен**, User CA + Host CA, CRL |
+| **fbsd-ca-sel** | `fbsd-ca-sel.lab.sel` | FreeBSD 15.1-RELEASE amd64 | `178.72.xxx.xxx` (замазан) | `172.16.0.3/16` (vtnet0) | Мини-CA, только sshd | **активен**, User CA + Host CA, CRL, вход с Mac M4 напрямую |
 | **fbsd-2-sel** | `fbsd-2-sel.lab.sel` | FreeBSD 15.1-RELEASE amd64 | **нет** (только приватный) | `172.16.0.4/16` (vtnet0) | ZFS-реплика, будущая CARP-пара | **активен**, sshguard + CA-доверие, вход через `ssh -J fbsd-1-sel` (TOTP снят 2026-09-06, см. раздел «Безопасность на `fbsd-2-sel`» ниже) |
 
 ### Локальный стенд (UTM на Mac M4)
@@ -126,6 +126,7 @@ graph TB
 
 ## История изменений
 
+- **2026-10-12 (v3.3, по итогам ревизии Дня 3 Фазы 1)** — исправлены фактические ошибки в документации: `fbsd-ca-sel` имеет публичный IP и принимает вход с Mac M4 напрямую (было «jump через F1» — противоречило roadmap и phase-0.1); приватный ключ репликации `zfs_repl` перенесён со схемы ноутбука на `fbsd-1-sel`, где он и живёт (`from="172.16.0.2"` не пускает подключения с ноутбука). Репликация по-прежнему `fbsd-1-sel → fbsd-2-sel` по `172.16.0.0/16`.
 - **2026-09-06 (v3.2, Неделя 1 Фазы 1 закрыта)** — `fbsd-2-sel` приведён к финальному виду: TOTP снят, `user_ca.pub` скопирован, `TrustedUserCAKeys` в `sshd_config` + рестарт, баннер в `/etc/motd` + `Banner` в `sshd_config`. Все пункты «Что нужно донастроить» закрыты, раздел удалён. Сеть унифицирована с `fbsd-1-sel` (search domain `lab.sel`, CIDR-нотация, полный DNS-список). PF v2 (antispoof, NAT-stub) применён на обеих нодах через единый `docs/phase-1/pf-ruleset.conf`. Неделя 1 (Сеть + PF) — полностью закрыта.
 - **2026-09-06 (v3.1, День 1 Фазы 1, продолжение)** — на `fbsd-2-sel` снят TOTP (jump-only, single factor: ed25519 + сертификат). `user_ca.pub` скопирован на ноду, `TrustedUserCAKeys` — в работе. Причина: `fbsd-2-sel` без публичного IP, единственный путь входа — через `fbsd-1-sel` (где TOTP уже стоит), двойной TOTP на цепочке избыточен.
 - **2026-08-30 (v3, День 1 Фазы 1)** — поднят `fbsd-2-sel` в Selectel (FreeBSD 15.1 amd64, только приватный IP `172.16.0.4`, jump-host через `fbsd-1-sel`). Базовый харденинг + sshguard + TOTP + ntpd выполнены. Host-ключ подписан через `fbsd-ca-sel` (TTL 52w). Баннер и User CA-доверие (`TrustedUserCAKeys`) — в работе. Решение: `fbsd-2-sel` остаётся без публичного IP, межсервисный трафик идёт по `172.16.0.0/16`.
