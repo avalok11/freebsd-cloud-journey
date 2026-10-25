@@ -146,20 +146,119 @@ ssh -i ~/.ssh/freebsd_lab-cert avalok11@fbsd-ca-sel.lab.sel \
 
 ## Тесты
 
-| # | Команда | Ожидаемый результат |
-|---|---|---|
-| 1 | `sudo ssh -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id` с master | команда `id` подменена на `zfs receive`; интерактивного шелла нет |
-| 2 | `sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id 2>&1 \| grep -E 'Sending command\|Authenticated'` с master | в логе `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl` |
-| 3 | подключение с Mac M4 без `-J` | `Permission denied` — `from="172.16.0.2"` не совпал с адресом ноутбука |
+Проверяются три независимых ограничения: по адресу источника (`from=`), по
+подмене команды (`force-command`) и по запрету терминала (`no-pty`). Каждый тест
+имеет цель, проверяемую гипотезу и ожидаемый результат — полный разбор в
+[README.md](./README.md) → «День 3».
 
-> **Тесты 1–2 запускаются с master и от root.** Ключ лежит в `/root/.ssh/`, обычному
+| # | Что проверяем | Откуда запускаем | Ожидаемый результат |
+|---|---|---|---|
+| 1 | `from="172.16.0.2"` отсекает чужие адреса | `fbsd-ca-sel` (172.16.0.3) | `Permission denied (publickey)` |
+| 2 | `force-command` подменяет команду клиента | master, от root | `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl` |
+| 3 | `no-pty` запрещает выделение терминала | master, от root | `PTY allocation request failed on channel 0` |
+
+> **Тесты 2–3 запускаются с master и от root.** Ключ лежит в `/root/.ssh/`, обычному
 > пользователю файл не читается, и `ssh` падает на чтении ключа — до установки
 > соединения. Из-под обычного пользователя с ключом в `/root/.ssh/` grep не находит
 > ничего: это не проблема доступа, а просто нечитаемый ключ.
 
-Отдельно стоит проверить, что вход с другого адреса отвергается: `zfs receive` не должен
-работать при подключении не с `172.16.0.2`. Это проверяется с Mac M4 напрямую
-(без `-J`).
+### Тест 1 — ограничение по адресу источника
+
+**Гипотеза.** `from="172.16.0.2"` — работающий барьер: даже валидно подписанный
+сертификатом ключ с правильным principal не даёт доступ с чужого адреса.
+
+**Важно:** тест обязан предъявлять **сертификат**, иначе он не проверяет ничего.
+Клиент ssh ищет сертификат по шаблону `<имя_приватного_ключа>-cert.pub` рядом с
+самим ключом. Если сертификат лежит отдельно, клиент предъявит «голый» публичный
+ключ, sshd не найдёт для него `authorized_keys` (а его у `zfs-repl` намеренно нет) и
+откажет — но по другой причине, чем `from=`. Подробно — в «Грабли».
+
+```sh
+# на fbsd-ca-sel
+ssh-keygen -t ed25519 -f /tmp/zfs_repl_fromtest -N "" -C "from-test@ca-sel"
+sudo /usr/local/sshca/scripts/sign-user-cert.sh \
+     /tmp/zfs_repl_fromtest.pub zfs-repl +52w zfs_repl_fromtest
+
+# сертификат КЛАДЁМ РЯДОМ с приватным ключом — иначе клиент его не подхватит
+cp /usr/local/sshca/users/zfs_repl_fromtest/zfs_repl_fromtest-cert.pub \
+   /tmp/zfs_repl_fromtest-cert.pub
+
+ssh -v -i /tmp/zfs_repl_fromtest zfs-repl@172.16.0.4 id < /dev/null 2>&1 \
+  | grep -E 'Offering|Server accepts|Permission denied'
+```
+
+Ожидаемый вывод — в строке `Offering` обязан быть **`ED25519-CERT`** и путь с
+`-cert.pub`:
+
+```
+debug1: Offering public key: /tmp/zfs_repl_fromtest-cert.pub ED25519-CERT SHA256:...
+zfs-repl@172.16.0.4: Permission denied (publickey).
+```
+
+Строки `Server accepts key` быть не должно — она означала бы, что ключ принят и
+`from=` не сработал.
+
+**Positive control (A/B).** Чтобы исключить «сертификат невалиден вообще»,
+разрешаем `ca-sel` временно (через out-of-band консоль Selectel):
+
+```sh
+sudo cp /etc/ssh/auth_principals/zfs-repl /etc/ssh/auth_principals/zfs-repl.bak
+sudo sed -i '' 's/from="172.16.0.2"/from="172.16.0.2",from="172.16.0.3"/' \
+     /etc/ssh/auth_principals/zfs-repl
+sudo service sshd reload
+```
+
+Повтор подключения с `ca-sel` теперь должен **не** давать `Permission denied`,
+а показывать ошибку ZFS про невалидный поток — то есть аутентификация прошла, а
+`force-command` исполнил `zfs receive` с пустым stdin. Разница между провалом и
+успехом объясняется **только** `from=`.
+
+```sh
+sudo mv /etc/ssh/auth_principals/zfs-repl.bak /etc/ssh/auth_principals/zfs-repl
+sudo service sshd reload
+rm -f /tmp/zfs_repl_fromtest*
+sudo rm -rf /usr/local/sshca/users/zfs_repl_fromtest
+```
+
+### Тест 2 — подмена команды клиента
+
+**Гипотеза.** `force-command` **заменяет** команду клиента целиком, а не дополняет
+её: клиент просит `id` — выполняется `zfs receive`.
+
+```sh
+sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id < /dev/null 2>&1 \
+  | grep -E 'Authenticated|Sending command'
+```
+
+Ожидаемый вывод:
+
+```
+Authenticated to 172.16.0.4 ([172.16.0.4]).
+Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl
+```
+
+Второе доказательство подмены: вывода `uid=0(root)` не будет — вместо него придёт
+ошибка ZFS про невалидный поток, потому что команда подставлена, а данных на stdin
+нет. Редирект `< /dev/null` обязателен, иначе `zfs receive` будет читать поток из
+терминала и подвиснет.
+
+### Тест 3 — запрет выделения терминала
+
+**Гипотеза.** `no-pty` запрещает выделение псевдо-терминала на сервере: клиент
+может сколько угодно требовать pty, сервер откажет.
+
+```sh
+sudo ssh -tt -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id < /dev/null 2>&1 | tail -5
+```
+
+Ожидаемый вывод:
+
+```
+PTY allocation request failed on channel 0
+```
+
+Обычный `ssh host cmd` pty и не запрашивает, поэтому тест информативен только с
+`-tt` — он заставляет клиента **настаивать** на терминале.
 
 ## Защита в глубину
 
