@@ -149,7 +149,7 @@
 
 - **День 3 (~2 ч) — Тесты + failover**
   - **Тест 1 (source-address):** подключиться к `zfs-repl@172.16.0.4` с Mac M4 напрямую, без `-J` — `Permission denied`, IP ноутбука не `172.16.0.2`
-  - **Тест 2 (force-command):** `sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id` **с master и от root** (иначе ключ в `/root/.ssh/` нечитаем) — в debug-логе `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl`, а не `id`
+  - **Тест 2 (force-command):** `sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id < /dev/null` **с master и от root** (иначе ключ в `/root/.ssh/` нечитаем) — в debug-логе строка `Remote: principals: key options: command user-rc` (в действующем наборе опций остались только `command` и `user-rc`, ни pty, ни форвардингов) и **нет** вывода `uid=`: команда `id` не выполнялась, вместо неё отработал `zfs receive`. Строка `Sending command: id` в логе — это запрос клиента, а не выполненная команда
   - **Тест 3 (no-pty):** та же команда с `-T` — pty не выделяется, интерактивный шелл не открывается
   - **Тест 4 (failover):** остановить `fbsd-1-sel` через панель Selectel, проверить что `zroot/tank/repl` на `fbsd-2-sel` смонтирован и читаем
   - **Тест 5 (scrub):** `zpool scrub zroot` на обеих нодах, `zpool status` — без ошибок
@@ -273,6 +273,19 @@ default            172.16.0.1         UGS         vtnet0
   2. Делать **positive control**: временно разрешить адрес (A/B) и убедиться, что тот же самый тест начинает проходить. Тогда единственной переменной остаётся `from=`.
 
   Это общий принцип тестирования, а не частный случай SSH: «тест зелёный» и «тест что-то доказал» — разные утверждения.
+- **2026-10-26 — строка `Sending command:` в логе показывает запрос клиента, а не выполненную команду.** При проверке `force-command` ожидание было «в логе будет `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl`». Не будет: `Sending command:` формирует **клиент**, и он всегда пишит то, что *просил* выполнить. Подменённая команда подставляется на сервере и в логе клиента не видна.
+
+  Где смотреть на самом деле — строки `Remote:` в `-v`-логе:
+
+  ```
+  debug1: Remote: cert: key options: agent-forwarding port-forwarding pty user-rc x11-forwarding
+  debug1: Remote: principals: key options: command user-rc
+  ```
+
+  Вторая строка — набор опций, применённых сервером из principals-файла. Здесь в нём остались только `command` и `user-rc`: **ни** pty, **ни** port-forwarding, **ни** agent-forwarding, **ни** x11-forwarding. Это и есть доказательство подмены команды и запрета терминала.
+
+  Побочный вывод, который стоит держать в голове отдельно: **первая строка показывает, что сам сертификат не ограничивает ничего** — в нём разрешены pty, port-forwarding, agent-forwarding и x11-forwarding. Ограничивает именно строка в `/etc/ssh/auth_principals/zfs-repl` на сервере, а эффективные права — пересечение наборов сертификата и principals-файла. Значит, граница безопасности этой учётки — не в сертификате, а в файле на сервере. И это ещё один аргумент не создавать `authorized_keys` для `zfs-repl`: появись он, principals-файл перестал бы быть единственным источником ограничений.
+- **2026-10-26 — `force-command` с `zfs receive` зависает, если не перенаправить stdin.** `zfs receive` читает ZFS-поток из stdin; без `< /dev/null` stdin остаётся терминалом, и команда молча ждёт поток. В `-v`-логе это выглядит как остановка на `debug1: pledge: fork` — выглядит как «подвис SSH», а на самом деле это работает правильно, просто ждёт ввода. В тестовых командах редирект обязателен.
 
 
 ## Метрики

@@ -154,7 +154,7 @@ ssh -i ~/.ssh/freebsd_lab-cert avalok11@fbsd-ca-sel.lab.sel \
 | # | Что проверяем | Откуда запускаем | Ожидаемый результат |
 |---|---|---|---|
 | 1 | `from="172.16.0.2"` отсекает чужие адреса | `fbsd-ca-sel` (172.16.0.3) | `Permission denied (publickey)` |
-| 2 | `force-command` подменяет команду клиента | master, от root | `Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl` |
+| 2 | `force-command` подменяет команду клиента | master, от root | `Remote: principals: key options: command user-rc` и отсутствие вывода `uid=` |
 | 3 | `no-pty` запрещает выделение терминала | master, от root | `PTY allocation request failed on channel 0` |
 
 > **Тесты 2–3 запускаются с master и от root.** Ключ лежит в `/root/.ssh/`, обычному
@@ -227,20 +227,40 @@ sudo rm -rf /usr/local/sshca/users/zfs_repl_fromtest
 
 ```sh
 sudo ssh -v -i /root/.ssh/zfs_repl zfs-repl@172.16.0.4 id < /dev/null 2>&1 \
-  | grep -E 'Authenticated|Sending command'
+  | grep -E 'Authenticated|Remote: principals|Sending command|uid='
 ```
 
 Ожидаемый вывод:
 
 ```
-Authenticated to 172.16.0.4 ([172.16.0.4]).
-Sending command: /usr/bin/env /sbin/zfs receive -F zroot/tank/repl
+Authenticated to 172.16.0.4 ([172.16.0.4]:22) using "publickey".
+debug1: Remote: principals: key options: command user-rc
+debug1: Sending command: id
 ```
 
-Второе доказательство подмены: вывода `uid=0(root)` не будет — вместо него придёт
-ошибка ZFS про невалидный поток, потому что команда подставлена, а данных на stdin
-нет. Редирект `< /dev/null` обязателен, иначе `zfs receive` будет читать поток из
-терминала и подвиснет.
+Строки `uid=` быть **не должно** — вместо неё придёт ошибка ZFS про невалидный
+поток, потому что команда, которая реально выполнилась, была `zfs receive`.
+
+> **Про строку `Sending command`.** Это вывод **клиента**: он всегда пишет, какую
+> команду *просил* выполнить. Подменённую команду клиент не показывает — она
+> подставляется на сервере. Поэтому искать в логе `Sending command: /usr/bin/env
+> /sbin/zfs receive ...` бесполезно: такой строки там не бывает. Признак подмены
+> виден в строке `Remote: principals: key options: command user-rc` — сервер
+> применил `command="..."` из principals-файла, и в наборе опций остались только
+> `command` и `user-rc`: **ни** pty, **ни** port-forwarding, **ни**
+> agent-forwarding, **ни** x11-forwarding.
+
+> **Про строку `Remote: cert: key options: ...`.** Сертификат сам по себе не
+> ограничивает ничего: в нём разрешены agent-forwarding, port-forwarding, pty и
+> x11-forwarding. Ограничивает именно строка principals-файла, и эффективные права
+> — это пересечение двух наборов. Практический вывод: **граница безопасности здесь
+> не в сертификате, а в `/etc/ssh/auth_principals/zfs-repl` на сервере**. Ещё один
+> аргумент не создавать `authorized_keys` для `zfs-repl`: появись он — и
+> principals-файл перестал бы быть единственным источником ограничений.
+
+> **Редирект `< /dev/null` обязателен.** `force-command` — это `zfs receive`, а он
+> читает ZFS-поток из stdin. Без редиректа stdin остаётся терминалом, и команда
+> виснет, ожидая поток. В логе это выглядит как остановка на `debug1: pledge: fork`.
 
 ### Тест 3 — запрет выделения терминала
 
@@ -259,6 +279,11 @@ PTY allocation request failed on channel 0
 
 Обычный `ssh host cmd` pty и не запрашивает, поэтому тест информативен только с
 `-tt` — он заставляет клиента **настаивать** на терминале.
+
+Дополнительно полезно посмотреть `-v`-лог того же подключения: строка
+`Remote: principals: key options: command user-rc` показывает, что в
+действующем наборе опций **нет** pty — то есть ограничение `no-pty`
+применилось, а не просто не было запрошено.
 
 ## Защита в глубину
 
