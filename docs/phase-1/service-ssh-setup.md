@@ -198,13 +198,16 @@ zfs-repl@172.16.0.4: Permission denied (publickey).
 `from=` не сработал.
 
 **Positive control (A/B).** Чтобы исключить «сертификат невалиден вообще»,
-разрешаем `ca-sel` временно (через out-of-band консоль Selectel):
+разрешаем `ca-sel` временно. Master поднят, поэтому replica доступна обычным
+путём через jump-host — консоль Selectel не нужна:
 
 ```sh
-sudo cp /etc/ssh/auth_principals/zfs-repl /etc/ssh/auth_principals/zfs-repl.bak
-sudo sed -i '' 's/from="172.16.0.2"/from="172.16.0.2",from="172.16.0.3"/' \
-     /etc/ssh/auth_principals/zfs-repl
-sudo service sshd reload
+# с Mac M4
+ssh -J fbsd-1-sel avalok11@fbsd-2-sel.lab.sel \
+  "sudo cp /etc/ssh/auth_principals/zfs-repl /etc/ssh/auth_principals/zfs-repl.bak && \
+   sudo sed -i '' 's/from=\"172.16.0.2\"/from=\"172.16.0.2\",from=\"172.16.0.3\"/' \
+        /etc/ssh/auth_principals/zfs-repl && \
+   sudo service sshd reload"
 ```
 
 Повтор подключения с `ca-sel` теперь должен **не** давать `Permission denied`,
@@ -283,6 +286,55 @@ ssh -J fbsd-1-sel avalok11@fbsd-2-sel.lab.sel \
 теперь `zroot/tank/data@repl-5`.
 
 Разбор и результаты — в [отчёте](./phase-1-zfs-report.md) → «Failover».
+
+## Результаты прогонов (2026-10-26)
+
+### Тест 1 — `from=` ✅ пройден
+
+```
+debug1: Offering public key: /tmp/zfs_repl_fromtest ED25519 SHA256:uDjpyxB34LnxFO7YHTvrsaixV4pF3w4RzBbRnI2sjqE explicit
+debug1: Offering public key: /tmp/zfs_repl_fromtest ED25519-CERT SHA256:uDjpyxB34LnxFO7YHTvrsaixV4pF3w4RzBbRnI2sjqE explicit
+zfs-repl@172.16.0.4: Permission denied (publickey).
+```
+
+Ключевое отличие от первого (невалидного) прогона: предъявлен **сертификат** —
+вторая строка `Offering` содержит `ED25519-CERT`. Значит, клиент показал sshd
+сертификат с principal=`zfs-repl`, и сервер его отверг. Строки `Server accepts key`
+нет — ключ не принят.
+
+**Что доказано:** с чужого адреса (`172.16.0.3`) сервисная учётка недоступна, даже
+с валидно подписанным сертификатом.
+
+**Что осталось за скобками:** отказ пока не атрибутирован именно `from=`. Теоретически
+те же симптомы дали бы и «сертификат невалиден», и «principal не найден». Косвенно
+это снимается тем, что с master тот же механизм (тот же CA, тот же principals-файл)
+работает — см. Тест 2. Но полная изоляция причины требует positive control (A/B)
+выше. **A/B остаётся открытым пунктом.**
+
+### Тест 2 — `force-command` + `no-pty` ✅ пройден
+
+```
+Authenticated to 172.16.0.4 ([172.16.0.4]:22) using "publickey".
+debug1: Remote: principals: key options: command user-rc
+debug1: Remote: principals: key options: command user-rc
+debug1: Sending command: id
+```
+
+Три подтверждения:
+
+1. `Authenticated ... using "publickey"` — аутентификация сертификатом прошла.
+2. `Remote: principals: key options: command user-rc` — сервер применил опции из
+   principals-файла. В действующем наборе остались только `command` и `user-rc`:
+   **ни** pty, **ни** port-forwarding, **ни** agent-forwarding, **ни**
+   x11-forwarding. Это одновременно доказательство работы `force-command` и `no-pty`.
+3. Вывода `uid=` **нет** — команда `id` не выполнялась, вместо неё отработал
+   `zfs receive` (ошибка про невалидный поток). Это и есть подмена команды.
+
+Строка `Sending command: id` — запрос клиента, а не выполненная команда; в
+действующем наборе опций `command` — это подставленный `zfs receive`.
+
+Строка `Remote: principals:` дублируется — OpenSSH 10.0 логирует набор опций дважды,
+для пути проверки сертификата и для итогового. На результат не влияет.
 
 ## Защита в глубину
 
