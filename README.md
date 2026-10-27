@@ -16,11 +16,12 @@
 
 - [`roadmap.md`](./docs/roadmap.md) — детальный план обучения по 8 фазам, 22 недели, с теорией, практикой, тестированием и артефактами.
 - [`architecture.md`](./docs/architecture.md) — целевая архитектура кластера (Mermaid-диаграмма).
+- [`config/`](./config/) — конфиги нод **лабораторного стенда** в том виде, в каком они реально применены. Не боевые: боевые живут в приватном `infra-configs`.
 - `docs/phase-N/` — папки по фазам. Внутри каждой:
   - **`NN-тема.md`** — короткие теоретические заметки (3–15 минут чтения) по темам данной фазы. Без воды, с привязкой к нашему стеку и сравнением с Linux.
   - **`README.md`** — отчёт по фазе: что сделано, что получилось, грабли, графики, выводы.
 
-**Чего здесь НЕТ:** реальных конфигов инфраструктуры, доменов и сертификатов. Публичные IP замазаны, приватные адреса стенда показаны как есть — это номера внутри RFC 1918 (`172.16.0.0/16`, `192.168.64.0/24`), они не маршрутизируются в интернете и ничего не раскрывают. Всё остальное живёт в приватном репозитории `infra-configs` в Gitea внутри кластера.
+**Чего здесь НЕТ:** реальных конфигов инфраструктуры заказчика, доменов и сертификатов. Публичные IP замазаны, приватные адреса стенда показаны как есть — это номера внутри RFC 1918 (`172.16.0.0/16`, `192.168.64.0/24`), они не маршрутизируются в интернете и ничего не раскрывают. Папка `config/` — исключение из этого правила в сторону лаборатории: там конфиги **учебного** стенда, они нужны как исходники для ролей Ansible Фазы 4. Всё остальное живёт в приватном репозитории `infra-configs` в Gitea внутри кластера.
 
 ## Стек
 
@@ -83,7 +84,7 @@
 
 - [`docs/phase-1/service-ssh-setup.md`](./docs/phase-1/service-ssh-setup.md) — сервисная учётка `zfs-repl`: ограничения в `AuthorizedPrincipalsFile`, права через `zfs allow`, тесты
 - [`docs/phase-1/zfs-replication.sh`](./docs/phase-1/zfs-replication.sh) — скрипт репликации (POSIX sh, запуск от root на master)
-- [`docs/phase-1/pf-ruleset.conf`](./docs/phase-1/pf-ruleset.conf) — единый PF ruleset для обеих нод
+- [`docs/phase-1/pf-ruleset.conf`](./docs/phase-1/pf-ruleset.conf) — единый PF ruleset для нод стенда (на `fbsd-3-sel` применяется с Дня 3 Фазы 2)
 
 **Теоретические заметки:**
 
@@ -92,10 +93,10 @@
 - [`docs/phase-1/03-zfs-advanced.md`](./docs/phase-1/03-zfs-advanced.md) — ZFS продвинутый: ARC, zpool, dataset, snapshot, send/receive, encryption, dedup
 - [`docs/phase-1/04-bhyve-vs-kvm.md`](./docs/phase-1/04-bhyve-vs-kvm.md) — bhyve vs KVM vs VMware ESXi, нюанс arm64
 
-### Фаза 2 — Виртуализация и изоляция: jails, bhyve, Bastille (не начата)
+### Фаза 2 — Виртуализация и изоляция: jails, bhyve, Bastille (начата: День 0 выполнен)
 
 - [`docs/phase-2/README.md`](./docs/phase-2/README.md) — план по неделям и дням, риски, критерии тестирования
-- [`docs/phase-2/00-fbsd-3-sel-provisioning.md`](./docs/phase-2/00-fbsd-3-sel-provisioning.md) — развёртывание нового master'а `fbsd-3-sel` взамен выбывшего `fbsd-1-sel` и восстановление данных с реплики
+- [`docs/phase-2/00-fbsd-3-sel-provisioning.md`](./docs/phase-2/00-fbsd-3-sel-provisioning.md) — развёртывание `fbsd-3-sel` **в дополнение** к выбывшему `fbsd-1-sel` и восстановление данных с реплики
 - [`docs/phase-2/01-jails-vs-containers.md`](./docs/phase-2/01-jails-vs-containers.md) — как устроена изоляция в ядре FreeBSD, сравнение с Docker/LXC
 - [`docs/phase-2/02-bastille-vs-others.md`](./docs/phase-2/02-bastille-vs-others.md) — модель Bastille, типы jail'ов, Bastillefile, pkgbase на 15.x
 - [`docs/phase-2/03-vnet-and-network.md`](./docs/phase-2/03-vnet-and-network.md) — VNET: свой сетевой стек, `bridge` + `epair`, NAT и `rdr`
