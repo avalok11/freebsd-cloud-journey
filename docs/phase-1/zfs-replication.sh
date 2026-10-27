@@ -1,17 +1,23 @@
 #!/bin/sh
-# ZFS replication: fbsd-1-sel (master) -> fbsd-2-sel (replica)
+# ZFS replication: master -> fbsd-2-sel (replica)
 #
-# Устанавливается на fbsd-1-sel в /usr/local/sbin/zfs-replication.sh
+# Устанавливается на master'е в /usr/local/sbin/zfs-replication.sh.
 # Запускается от root вручную или из cron (автоматизация — Фаза 4, Ansible).
+#
+# Master менялся: fbsd-1-sel (172.16.0.2) → fbsd-3-sel (172.16.0.5).
+# Реплика осталась прежней: fbsd-2-sel (172.16.0.4).
 #
 # Схема доступа:
 #   - приватный ключ zfs-repl лежит на master (/root/.ssh/zfs_repl), НЕ на ноутбуке:
-#     from="172.16.0.2" в auth_principals/zfs-repl разрешает вход только с master,
+#     from="172.16.0.5" в auth_principals/zfs-repl разрешает вход только с master,
 #     и попытка запустить репликацию с Mac M4 будет отклонена на replica
 #   - на replica работает сервисная учётка zfs-repl с force-command, который
 #     ПОДМЕНЯЕТ любую команду клиента на `zfs receive -F zroot/tank/repl`
 #   - sudo на replica не используется: права выданы через `zfs allow`
 #   - TOTP на replica нет, вход по сертификату CA (principal=zfs-repl, TTL 52w)
+#   - сертификат обязан лежать РЯДОМ с ключом: /root/.ssh/zfs_repl-cert.pub
+#     (ssh ищет сертификат по шаблону <имя_ключа>-cert.pub; иначе предъявит
+#     «голый» публичный ключ, и zfs-repl его не примет)
 
 set -eu
 

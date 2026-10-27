@@ -264,30 +264,59 @@ ls -l /zroot/tank/data
 Старый приватный ключ потерян вместе с нодой. Выпускаем новый — CA жив.
 
 ```sh
-# на fbsd-3-sel
+# на fbsd-3-sel — новый ключ
 sudo ssh-keygen -t ed25519 -f /root/.ssh/zfs_repl -C "zfs-repl@fbsd-3-sel"
-sudo scp /root/.ssh/zfs_repl.pub fbsd-ca-sel:/tmp/
 
-# на CA — подписать с тем же principal
+# публичный ключ — на CA (файл лежит в /root, поэтому читаем через sudo)
+ssh fbsd-3-sel 'sudo cat /root/.ssh/zfs_repl.pub' \
+  | ssh fbsd-ca-sel 'cat > /tmp/zfs_repl.pub'
+
+# на CA — подписать: principal тот же, каталог хранения ДРУГОЙ
 ssh fbsd-ca-sel 'sudo /usr/local/sshca/scripts/sign-user-cert.sh \
-    /tmp/zfs_repl.pub zfs-repl +52w zfs-repl'
+    /tmp/zfs_repl.pub zfs-repl +52w zfs_repl_3'
 
-# забрать сертификат
-scp fbsd-ca-sel:/usr/local/sshca/users/zfs-repl/zfs_repl-cert.pub /root/.ssh/
-sudo chmod 600 /root/.ssh/zfs_repl
+# забрать сертификат (каталог CA — 700, поэтому читаем через sudo)
+ssh fbsd-ca-sel 'sudo cat /usr/local/sshca/users/zfs_repl_3/zfs_repl-cert.pub' \
+  > /tmp/zfs_repl-cert.pub
+
+# положить на ноду РЯДОМ с приватным ключом
+scp /tmp/zfs_repl-cert.pub fbsd-3-sel:/tmp/zfs_repl-cert.pub
+ssh fbsd-3-sel 'sudo cp /tmp/zfs_repl-cert.pub /root/.ssh/zfs_repl-cert.pub && \
+    sudo chmod 600 /root/.ssh/zfs_repl /root/.ssh/zfs_repl-cert.pub && \
+    rm -f /tmp/zfs_repl-cert.pub'
 ```
+
+> **Почему каталог `zfs_repl_3`, а не `zfs_repl`.** `sign-user-cert.sh` копирует
+> публичный ключ в каталог CA **только если там ещё нет файла с таким именем**, а
+> подписывает всегда **файл из каталога**, а не переданный. Старый ключ лежит в
+> `users/zfs_repl/zfs_repl.pub`, поэтому повторная подпись с тем же именем тихо
+> выпустила бы сертификат **на старый ключ** — новый приватный ключ ему не
+> соответствует, и вход на реплику упал бы с невнятной ошибкой. Новый каталог
+> `zfs_repl_3` отделяет поколения ключей. Скрипт теперь падает с понятной ошибкой,
+> если в каталоге лежит другой ключ под тем же именем.
 
 **Отозвать старый сертификат.** Иначе старый ключ (если он ещё где-то есть) продолжит
 работать до конца TTL — 52 недели.
 
 ```sh
-# на CA — старый ключ лежит в каталоге пользователя
+# на CA — старый ключ лежит в каталоге zfs_repl
 ssh fbsd-ca-sel 'sudo /usr/local/sshca/scripts/revoke-ssh.sh user zfs_repl zfs_repl'
 
-# раздать обновлённый CRL на ноды
-scp fbsd-ca-sel:/usr/local/sshca/revoked/revoked_keys <нода>:/etc/ssh/ca/revoked_keys
-sudo service sshd restart     # на каждой ноде
+# раздать обновлённый CRL на ноды (файл читаемый — 644)
+scp fbsd-ca-sel:/usr/local/sshca/revoked/revoked_keys fbsd-3-sel:/tmp/revoked_keys
+ssh fbsd-3-sel 'sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
+    sudo chmod 644 /etc/ssh/ca/revoked_keys && rm -f /tmp/revoked_keys && \
+    sudo service sshd restart'
+
+# то же — на реплику, там сертификаты zfs-repl и проверяются
+scp fbsd-ca-sel:/usr/local/sshca/revoked/revoked_keys fbsd-2-sel:/tmp/revoked_keys
+ssh -J fbsd-3-sel fbsd-2-sel 'sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
+    sudo chmod 644 /etc/ssh/ca/revoked_keys && rm -f /tmp/revoked_keys && \
+    sudo service sshd restart'
 ```
+
+Отзыв старого ключа **не затрагивает новый**: CRL хранит публичные ключи, а у нового
+сертификата другой ключ.
 
 ### 1.4. Обновить `from=` на реплике
 
