@@ -33,12 +33,10 @@
 
 ## Теоретические заметки
 
-*(появятся по ходу)*
-
-- `01-jails-vs-containers.md` — jails vs Docker vs LXC: уровни изоляции, потребление ресурсов, сетевые модели, время старта
-- `02-bastille-vs-others.md` — iocage vs Bastille vs pot: сравнение менеджеров, жизненный цикл, шаблоны
-- `03-vnet-and-network.md` — VNET vs IP-алиасы, как jail получает адрес и как выходит в интернет
-- `04-zfs-and-jails.md` — почему jail на ZFS даёт бесплатные снапшоты и клоны, и как это отличается от Docker
+- [01-jails-vs-containers.md](./01-jails-vs-containers.md) — как устроена изоляция в ядре FreeBSD: `jail(2)`, что изолируется, а что нет, и сравнение с Docker/LXC
+- [02-bastille-vs-others.md](./02-bastille-vs-others.md) — модель Bastille (release → jail → ZFS-датасет), типы jail'ов, Bastillefile, `bastille.conf`, pkgbase на 15.x, сравнение с iocage и pot
+- [03-vnet-and-network.md](./03-vnet-and-network.md) — VNET: свой сетевой стек ядра, анатомия `bridge` + `epair`, NAT и `rdr` в PF, свой PF внутри jail'а
+- [04-zfs-and-jails.md](./04-zfs-and-jails.md) — jail в ZFS-датасете: мгновенные снапшоты и клоны, делегирование датасетов через `zfs jail`, миграция jail'а тем же `zfs send/receive`, что и в Фазе 1
 
 ## План по неделям и дням (~6 ч/неделю)
 
@@ -150,6 +148,7 @@
 - `bastille-automation.sh` — скрипт развёртывания сервиса
 - `benchmarks/jail-vs-bhyve.md` — сравнение производительности
 - `phase-2-report.md` — отчёт по фазе с реальными выводами команд
+- `01-jails-vs-containers.md`, `02-bastille-vs-others.md`, `03-vnet-and-network.md`, `04-zfs-and-jails.md` — теоретические заметки
 
 ## Что дальше
 

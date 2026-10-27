@@ -95,6 +95,10 @@
 ### Фаза 2 — Виртуализация и изоляция: jails, bhyve, Bastille (не начата)
 
 - [`docs/phase-2/README.md`](./docs/phase-2/README.md) — план по неделям и дням, риски, критерии тестирования
+- [`docs/phase-2/01-jails-vs-containers.md`](./docs/phase-2/01-jails-vs-containers.md) — как устроена изоляция в ядре FreeBSD, сравнение с Docker/LXC
+- [`docs/phase-2/02-bastille-vs-others.md`](./docs/phase-2/02-bastille-vs-others.md) — модель Bastille, типы jail'ов, Bastillefile, pkgbase на 15.x
+- [`docs/phase-2/03-vnet-and-network.md`](./docs/phase-2/03-vnet-and-network.md) — VNET: свой сетевой стек, `bridge` + `epair`, NAT и `rdr`
+- [`docs/phase-2/04-zfs-and-jails.md`](./docs/phase-2/04-zfs-and-jails.md) — jail в ZFS-датасете: снапшоты, клоны, делегирование датасетов
 - [`docs/phase-1/02-pf-vs-iptables.md`](./docs/phase-1/02-pf-vs-iptables.md) — PF vs iptables/nftables, история, синтаксис
 - [`docs/phase-1/03-zfs-advanced.md`](./docs/phase-1/03-zfs-advanced.md) — ZFS продвинутый: ARC, zpool, dataset, snapshot, send/receive, encryption, dedup
 - [`docs/phase-1/04-bhyve-vs-kvm.md`](./docs/phase-1/04-bhyve-vs-kvm.md) — bhyve vs KVM vs VMware ESXi, нюанс arm64
