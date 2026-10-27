@@ -80,33 +80,78 @@ bastille create -f Bastillefile
 
 ## Конфигурация: bastille.conf
 
-Глобальные настройки лежат в `/usr/local/etc/bastille/bastille.conf`:
+Глобальные настройки лежат в `/usr/local/etc/bastille/bastille.conf`. Имена параметров
+менялись между версиями, поэтому **точные дефолты смотрим на самой ноде**:
 
-| Параметр | Значение по умолчанию | Что делает |
-|---|---|---|
-| `bastille_jails_path` | `zroot/jails` | **где живут jail'ы** — нам нужен свой, `zroot/tank/jails` |
-| `bastille_jails_base` | `zroot` | базовый путь для ZFS-операций |
-| `bastille_jails_network` | `bridge0` | имя моста для VNET |
-| `bastille_jails_nat` | `bridge0` | интерфейс, на котором работает NAT |
-| `bastille_jails_dns` | `1.1.1.1 9.9.9.9` | DNS для jail'ов |
+```sh
+grep -E '^bastille_(zfs_|prefix|jailsdir|releasesdir|network_|pf_)' \
+     /usr/local/etc/bastille/bastille.conf
+```
 
-**Первое, что мы поменяем — `bastille_jails_path`.** Иначе jail'ы уедут в
-`zroot/jails`, минуя нашу иерархию `zroot/tank/*`, где все датасеты наследуют
-`compression=lz4` и `atime=off`. Плюс датасет `zroot/tank/jails` был запланирован
-ещё в Фазе 1.
+Ключевые параметры, которые нам нужно поменять (актуальные имена, FreeBSD 15.1,
+Bastille 1.4.x):
+
+| Параметр | Значение по умолчанию | Что делает | Что ставим |
+|---|---|---|---|
+| `bastille_zfs_enable` | **`NO`** | включает ли ZFS-поддержку | **`YES`** — иначе jail'ы не будут датасетами и не получат снапшотов |
+| `bastille_zfs_zpool` | пусто | имя пула | `zroot` |
+| `bastille_zfs_prefix` | `bastille` | датасет **без имени пула** | `tank/jails` |
+| `bastille_prefix` | `/usr/local/bastille` | префикс и точка монтирования датасета | оставляем |
+| `bastille_network_loopback` | `bastille0` | имя клонированного loopback-интерфейса для jail'ов | оставляем |
+| `bastille_network_pf_ext_if` | `ext_if` | имя **переменной** ext_if в pf.conf | `ext_if` — у нас уже есть такая переменная |
+| `bastille_network_pf_table` | `jails` | имя PF-таблицы с адресами jail'ов | оставляем |
+| `bastille_network_vnet_type` | `if_bridge` | тип VNET: мост или netgraph | `if_bridge` |
+| `bastille_pkgbase_packages` | `base-jail` | набор pkgbase-пакетов для bootstrap | оставляем |
+| `bastille_zfs_options` | `-o compress=on -o atime=off` | свойства создаваемых датасетов | оставляем — совпадает с нашими |
+
+**Два важных следствия.**
+
+Первое: `bastille_zfs_enable` по умолчанию **`NO`**. Если это не переключить,
+Bastille создаст jail'ы как обычные каталоги на UFS, и вся история про ZFS-снапшоты
+не работает. Это не «должно работать из коробки» — это настройка.
+
+Второе: `bastille_zfs_prefix` — **датасет без имени пула**, пул задаётся отдельно
+через `bastille_zfs_zpool`. Отсюда `zroot` + `tank/jails` = `zroot/tank/jails`.
+
+При этом `bastille_prefix` — это **точка монтирования** датасета: Bastille смонтирует
+`zroot/tank/jails` в `/usr/local/bastille`, а сами jail'ы будут жить в
+`${bastille_prefix}/jails`. То есть в ZFS-дереве получится `zroot/tank/jails/jails/<имя>`.
+Это некрасиво, но безвредно; главное — знать, куда смотреть. Если путь раздражает,
+можно задать `bastille_zfs_prefix="tank"` и получить jail'ы прямо в `zroot/tank/jails/`,
+но тогда Bastille начнёт работать с уже существующим датасетом `zroot/tank`, который
+несёт наши данные и логи, — риск выше. **Решение: отдельный датасет `tank/jails`,
+двойное «jails» в пути принимаем.**
 
 ### `bastille setup`
 
 Отдельная команда, готовит хост под работу Bastille:
 
 ```sh
-bastille setup
+bastille setup              # всё сразу
+bastille setup storage      # только хранилище
+bastille setup loopback     # только loopback-интерфейс
+bastille setup firewall     # только PF
 ```
 
-Она настраивает loopback-интерфейс, хранилище (ZFS, если включён) и **pf**.
-Ключевой момент: `bastille setup` правит PF сам — значит, наши правки в
-`pf-ruleset.conf` могут быть перезаписаны. Порядок важен: сначала `bastille setup`,
-затем применить наш ruleset поверх.
+Ключевой момент про PF: **Bastille копирует свой дефолтный `pf.conf` в `/etc/pf.conf`
+только если того ещё не существует.** У нас он существует и написан руками — значит,
+Bastille его не тронет. Но и anchor'ы, которые Bastille ожидает увидеть, в нашем
+ruleset отсутствуют. Поэтому в Фазе 2 (День 2) в `pf-ruleset.conf` добавляются:
+
+```pf
+table <jails> persist
+nat on $ext_if from <jails> to any -> ($ext_if:0)
+rdr-anchor "rdr/*"
+anchor "bastille/*"
+```
+
+и `set skip on lo` вместо `set skip on $lo_if` — клонированный loopback
+`bastille0` принадлежит группе `lo`, и без этого трафик jail'ов попадёт под
+наши правила.
+
+**Порядок применения:** сначала `bastille setup storage` и `bastille setup loopback`,
+затем наш `pf-ruleset.conf` через `pfctl -f`, и только потом `bastille setup firewall`
+либо ручная правка — чтобы Bastille не затёр наши правила.
 
 ## Сетевой слой: скрипт jib
 
@@ -146,7 +191,8 @@ Bastillefile работает на обеих архитектурах» это 
 ## Практика: полезные команды
 
 ```sh
-bastille setup                      # подготовить хост (loopback, ZFS, pf)
+bastille setup storage               # подготовить хранилище
+bastille setup loopback              # подготовить loopback-интерфейс
 bastille bootstrap --pkgbase 15.1-RELEASE
 bastille list                       # что есть: jail'ы, релизы, шаблоны
 bastille create -f Bastillefile    # создать jail из файла
