@@ -95,6 +95,7 @@
 ### Фаза 2 — Виртуализация и изоляция: jails, bhyve, Bastille (не начата)
 
 - [`docs/phase-2/README.md`](./docs/phase-2/README.md) — план по неделям и дням, риски, критерии тестирования
+- [`docs/phase-2/00-fbsd-3-sel-provisioning.md`](./docs/phase-2/00-fbsd-3-sel-provisioning.md) — развёртывание нового master'а `fbsd-3-sel` взамен выбывшего `fbsd-1-sel` и восстановление данных с реплики
 - [`docs/phase-2/01-jails-vs-containers.md`](./docs/phase-2/01-jails-vs-containers.md) — как устроена изоляция в ядре FreeBSD, сравнение с Docker/LXC
 - [`docs/phase-2/02-bastille-vs-others.md`](./docs/phase-2/02-bastille-vs-others.md) — модель Bastille, типы jail'ов, Bastillefile, pkgbase на 15.x
 - [`docs/phase-2/03-vnet-and-network.md`](./docs/phase-2/03-vnet-and-network.md) — VNET: свой сетевой стек, `bridge` + `epair`, NAT и `rdr`

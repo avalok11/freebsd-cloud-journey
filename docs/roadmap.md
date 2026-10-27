@@ -50,8 +50,16 @@
 | Фаза | VPS в Selectel | Стоимость ~ |
 |---|---|---|
 | 0–1 | 3× FreeBSD 15.1: `fbsd-1-sel` (prod), `fbsd-ca-sel` (SSH CA), `fbsd-2-sel` (replica для ZFS) | 2500–3500 ₽/мес |
+| 1.5 (внеплановая) | `fbsd-3-sel` — замена выбывшего `fbsd-1-sel`: 2 vCPU / 2 ГБ / 40 ГБ, роль master | +600–900 ₽/мес |
 | 2–4 | 3× FreeBSD 15.1 + 1× Debian 13.6 (2 CPU, 2–4 ГБ) | 4000–6000 ₽/мес |
 | 5–8 | 3× FreeBSD + 1× Linux + 1× monitoring + 1× Gitea | 7000–9000 ₽/мес |
+
+> **Изменение 2026-10-27.** `fbsd-1-sel` выбыла — Selectel не может её запустить из-за
+> нехватки ресурсов. Вместо неё развёртывается `fbsd-3-sel` с теми же функциями
+> master'а, но с 2 vCPU / 2 ГБ RAM: этого хватает и под bhyve в Фазе 2, и под
+> CARP + HAProxy в Фазе 3. Подробный план развёртывания и восстановления данных с
+> реплики — в
+> [`phase-2/00-fbsd-3-sel-provisioning.md`](./phase-2/00-fbsd-3-sel-provisioning.md).
 
 **Оптимизация:** линейка с почасовой оплатой → останавливать на ночь и в выходные, экономия до 60–70%.
 
@@ -419,13 +427,15 @@ graph TB
 - **ZFS + jails:** snapshot на уровне датасета = мгновенный клон.
 
 ### Практика
+0. **Внеплановая работа (Дни 0–1):** развернуть `fbsd-3-sel` взамен выбывшего `fbsd-1-sel`, восстановить данные с реплики `fbsd-2-sel`, выпустить новый сервисный ключ и отозвать старый. Подробно — в
+   [`phase-2/00-fbsd-3-sel-provisioning.md`](./phase-2/00-fbsd-3-sel-provisioning.md).
 1. Установка Bastille: `pkg install bastille bastille-bootstrap`.
-2. Инициализация: создание ZFS-датасета под jails, настройка сети (VNET).
+2. Инициализация: создание ZFS-датасета под jails, настройка сети (VNET). **На `fbsd-3-sel`.**
 3. Создание первого jail с nginx.
 4. Установка nginx внутри jail через `bastille pkg nginx-jail install nginx`.
 5. **Bastillefile** для сервиса (nginx + php-fpm).
 6. **Snapshot/clone workflow:** сделать snapshot работающего jail, клонировать.
-7. **В Selectel:** поднять bhyve с Debian через `vm-bhyve` для сравнения.
+7. **В Selectel (`fbsd-3-sel`):** поднять bhyve с Debian через `vm-bhyve` для сравнения.
 8. Создать шаблон сервиса «nginx + postgresql + php-fpm» в виде Bastillefile.
 
 ### Тестирование фазы 2
@@ -455,15 +465,20 @@ graph TB
 - **Split-brain и как его избежать:** fencing, STONITH, quorum disk.
 
 ### Практика (только в Selectel, нужны 2+ VPS)
-1. Создать второй VPS `fbsd-2-sel` в Selectel.
-2. Настроить приватную сеть между VPS через внутренний интерфейс Selectel.
-3. Настроить lagg на двух интерфейсах: `ifconfig_lagg0=laggproto lacp ...`.
-4. Поднять CARP между двумя нодами: shared VIP, master/backup, скрипт failover.
-5. Синхронизация конфигурации PF через cron + rsync.
-6. Установить HAProxy, настроить backend pool из 2 jail-нод.
-7. Health checks: автоматическое исключение из балансировки.
-8. Тест failover: выключить мастер-ноду, проверить что VIP переехал за ≤5 секунд.
-9. Тест нагрузки: запустить wrk на VIP, остановить один backend.
+> **После 2026-10-27 пара для HA — `fbsd-3-sel` + `fbsd-2-sel`.** Обе ноды работают,
+> `fbsd-3-sel` — master с ZFS-пулом и репликацией, `fbsd-2-sel` — реплика.
+> `fbsd-1-sel`, если вернётся, станет третьей нодой: на ней удобно проверить
+> split-brain, о котором ниже отдельный пункт.
+
+1. Настроить приватную сеть между VPS через внутренний интерфейс Selectel.
+2. Настроить lagg на двух интерфейсах: `ifconfig_lagg0=laggproto lacp ...`.
+3. Поднять CARP между двумя нодами: shared VIP, master/backup, скрипт failover.
+4. Синхронизация конфигурации PF через cron + rsync.
+5. Установить HAProxy, настроить backend pool из 2 jail-нод.
+6. Health checks: автоматическое исключение из балансировки.
+7. Тест failover: выключить мастер-ноду, проверить что VIP переехал за ≤5 секунд.
+8. Тест нагрузки: запустить wrk на VIP, остановить один backend.
+9. Если `fbsd-1-sel` вернулась — ре-сид с master'а и проверка split-brain на трёх нодах.
 
 ### Тестирование фазы 3
 - **CARP failover test:** 10 циклов kill мастера, замерить время переезда VIP.
