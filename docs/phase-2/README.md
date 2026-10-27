@@ -46,7 +46,7 @@
 - **День 1 (~2 ч) — Установка и bootstrap**
   - `pkg install bastille` на `fbsd-1-sel`
   - Создать `zfs create zroot/tank/jails` — датасет под jail'ы (в Фазе 1 был запланирован, но не создан)
-  - Указать Bastille свой путь под jail'ы: `bastille_jails_path` в `/usr/local/etc/bastille/bastille.conf` — не дефолтный `zroot/jails`, а наш `zroot/tank/jails`
+  - Указать Bastille свой путь под jail'ы: в `/usr/local/etc/bastille/bastille.conf` выставить `bastille_zfs_enable="YES"`, `bastille_zfs_zpool="zroot"`, `bastille_zfs_prefix="tank/jails"` (датасет **без** имени пула). `bastille_zfs_enable` по умолчанию `NO` — без него jail'ы не будут датасетами и не получат снапшотов
   - **Bootstrap.** В FreeBSD 15 базовая система управляется через `pkgbase`, поэтому для тонких jail'ов:
     ```sh
     bastille bootstrap --pkgbase 15.1-RELEASE
