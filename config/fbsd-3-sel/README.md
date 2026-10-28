@@ -36,7 +36,7 @@
 предъявляет свой host-сертификат, доверяет User CA и проверяет CRL.
 
 ```
-HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+HostCertificate /etc/ssh/ca/ssh_host_ed25519_key-cert.pub
 TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
 RevokedKeys /etc/ssh/ca/revoked_keys
 ```
@@ -54,41 +54,71 @@ RevokedKeys /etc/ssh/ca/revoked_keys
 |---|---|---|
 | User CA (публичный ключ) | `/etc/ssh/ca/user_ca.pub` | 644 |
 | CRL (отозванные ключи) | `/etc/ssh/ca/revoked_keys` | 644 |
-| host-сертификат | `/etc/ssh/ssh_host_ed25519_key-cert.pub` | 644 |
-
-Host-сертификат лежит рядом с приватным host-ключом в `/etc/ssh/`, а не в `ca/`:
-`sshd` ищет его рядом с ключом по имени `<имя_ключа>-cert.pub`.
+| host-сертификат | `/etc/ssh/ca/ssh_host_ed25519_key-cert.pub` | 644 |
 
 Изначально на `fbsd-3-sel` материалы лежали прямо в `/etc/ssh/`
 (`user_ca.pub`, `revoked_keys`), а на `fbsd-2-sel` — в `/etc/ssh/ca/`.
 Расхождение выравнено 2026-10-28 — см. расхождение 4 ниже.
 
+**Путь к host-сертификату — произвольный.** `HostCertificate` указывает sshd
+**явный путь** к файлу; рядом с приватным host-ключом сертификат лежать не
+обязан. Единственное требование — **публичный ключ в сертификате должен
+совпадать с приватным host-ключом**, уже прописанным в `HostKey`:
+
+> Specifies a file containing a public host certificate. The certificate's public
+> key must match a private host key already specified by HostKey.
+> — `sshd_config(5)`
+
+Правило «сертификат должен лежать рядом с ключом» — это про **клиентскую**
+сторону и **пользовательские** ключи: `ssh` ищет сертификат по шаблону
+`<имя_приватного_ключа>-cert.pub` в том же каталоге. К host-сертификату оно
+не относится.
+
+Проверить совпадение ключей:
+
+```sh
+ssh-keygen -Lf /etc/ssh/ca/ssh_host_ed25519_key-cert.pub | head -1
+ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+# одинаковый fingerprint (SHA256:...) — значит, ключи совпадают
+```
+
+**Расхождение с `fbsd-2-sel`.** Там host-сертификат остался в `/etc/ssh/`
+(`HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub`). Функционально это
+без разницы — путь произвольный, — но для единообразия ноды можно свести к
+одному пути.
+
 ## Расхождения, которые нужно закрыть
 
-### 1. Баннер скопирован с CA-ноды — поправка
+### 1. Баннер скопирован с CA-ноды — **исправлено 2026-10-28**
 
-`etc/issue.net` содержит баннер ноды CA:
+Было — баннер ноды CA, хотя `fbsd-3-sel` CA-нодой не является:
 
 ```
    FreeBSD Private Cloud — SSH Certificate Authority
    This is a SECURITY-SENSITIVE node (SSH CA).
 ```
 
-`fbsd-3-sel` — **не** CA-нода. Баннер вводит в заблуждение: любой, кто увидит
-логин, решит, что попал на ноду с приватными ключами CA. Нужен общий баннер стенда,
-без упоминания CA — **предлагаемый** вариант (в репозитории канонического текста
-баннера пока нет, его надо завести здесь же, когда нода будет приведена к виду):
+Стало:
 
 ```
 ================================================================
-   FreeBSD Private Cloud — Selectel staging
-   Authorized access only. All activities are logged.
+   FreeBSD Private Cloud — staging Selectel
+   All actions are logged. Authorized access only.
 
-   Issues: a@gmail.com
+   Issues: a.@gmail.com
 ================================================================
 ```
 
-Заодно в текущем файле опечатка в адресе — `a.@gmail.com` вместо `a@gmail.com`.
+Текст про CA убран — нода больше не выглядит нодой с приватными ключами CA.
+
+> **Осталась опечатка в адресе:** `a.@gmail.com` вместо `a@gmail.com`. Адрес с
+> точкой перед `@` Gmail не принимает — это опечатка, а не рабочий контакт.
+> Файл в репозитории оставлен **как применено**, поэтому правка должна идти
+> на ноду, а оттуда — сюда:
+>
+> ```sh
+> sudo sed -i '' 's/a\.@gmail\.com/a@gmail.com/' /etc/issue.net
+> ```
 
 ### 2. PF ruleset не тот, что в репо — сходим в День 3
 

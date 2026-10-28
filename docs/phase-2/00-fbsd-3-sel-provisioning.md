@@ -132,8 +132,9 @@ master, и нода для jails/bhyve. Разница — в том, что н�
 [`config/fbsd-3-sel/README.md`](../../config/fbsd-3-sel/README.md). Оттуда три
 важных пункта:
 
-1. **Баннер скопирован с CA-ноды** — на `fbsd-3-sel` в `issue.net` написано
-   «This is a SECURITY-SENSITIVE node (SSH CA)». Это неверно, нода не CA.
+1. **Баннер скопирован с CA-ноды** — было написано «This is a SECURITY-SENSITIVE
+   node (SSH CA)», хотя нода не CA. **Исправлено 2026-10-28:** текст про CA убран,
+   остался общий баннер стенда.
 2. **`nullok` в `/etc/pam.d/sshd` вырождает второй фактор** — подробный разбор
    в том же README. Кратко: `pam_google_authenticator` с `nullok` для пользователя
    без TOTP-секрета возвращает успех, а объявлен `sufficient` — значит, PAM
@@ -167,14 +168,15 @@ ssh fbsd-ca-sel 'sudo /usr/local/sshca/scripts/sign-host-cert.sh \
 
 # сертификат — на ноду
 scp fbsd-ca-sel:/usr/local/sshca/hosts/fbsd-3-sel/ssh_host_ed25519_key-cert.pub /tmp/
-sudo cp /tmp/ssh_host_ed25519_key-cert.pub /etc/ssh/
+sudo cp /tmp/ssh_host_ed25519_key-cert.pub /etc/ssh/ca/
+sudo chmod 644 /etc/ssh/ca/ssh_host_ed25519_key-cert.pub
 ```
 
 В `sshd_config.d/ca.conf` на ноде (файл применён, лежит в репозитории как
 [`config/fbsd-3-sel/etc/ssh/sshd_config.d/ca.conf`](../../config/fbsd-3-sel/etc/ssh/sshd_config.d/ca.conf)):
 
 ```
-HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+HostCertificate /etc/ssh/ca/ssh_host_ed25519_key-cert.pub
 TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
 RevokedKeys /etc/ssh/ca/revoked_keys
 ```
@@ -182,6 +184,10 @@ RevokedKeys /etc/ssh/ca/revoked_keys
 Первая строка — нода предъявляет свой host-сертификат клиентам. Вторая — нода
 доверяет User CA и проверяет сертификаты входящих. Третья — список отозванных
 ключей. Материалы CA лежат в `/etc/ssh/ca/` — так на всех нодах стенда.
+
+Путь к host-сертификату произвольный: `HostCertificate` — это явный путь, а
+рядом с приватным host-ключом сертификат лежать не обязан. Требование одно —
+публичный ключ в сертификате должен совпадать с host-ключом из `HostKey`.
 
 Доверие к CA — на самой ноде и на всех, кто к ней ходит:
 
@@ -472,7 +478,8 @@ split-brain, о котором в roadmap есть отдельный пункт
 - [x] `sshd_config.d/ca.conf` применён (host-сертификат, User CA, CRL) — файл в репозитории
 - [x] Host-сертификат выпущен на CA, положен в `/etc/ssh/`; `user_ca.pub` в `/etc/ssh/`, `host_ca.pub` — в `~/.ssh/` пользователя
 - [x] `zroot` пришёл с образом Selectel — `zpool create` не выполнялся
-- [ ] **Исправить баннер** — сейчас в `issue.net` текст CA-ноды (см. `config/fbsd-3-sel/README.md`)
+- [x] Баннер исправлен — текст CA-ноды убран (2026-10-28)
+- [ ] Поправить опечатку в адресе поддержки: `a.@gmail.com` → `a@gmail.com`
 - [ ] **Убрать `nullok`** из `/etc/pam.d/sshd` — иначе второй фактор вырождается (см. `config/fbsd-3-sel/README.md`)
 - [ ] Свести `/etc/pf.conf` с единым ruleset (делается в День 3, вместе с VNET)
 - [x] Раскладка файлов CA выровнена по всему стенду: `/etc/ssh/ca/` (2026-10-28)
