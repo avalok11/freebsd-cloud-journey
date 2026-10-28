@@ -265,8 +265,17 @@ ssh -J fbsd-3-sel avalok11@fbsd-2-sel.lab.sel
 принимать (`force-command` = `zfs receive`), а для разового DR-восстановления
 поднимать отдельный сервисный аккаунт с правом `zfs send` избыточно.
 
+**Предусловие на новом master'е:** датасет `zroot/tank` должен существовать —
+иначе `zfs receive` не сможет создать в нём `zroot/tank/data`.
+
 ```sh
-# с Mac M4 — две SSH-сессии, поток между ними
+ssh fbsd-3-sel 'zfs list zroot/tank' || \
+  ssh fbsd-3-sel 'sudo zfs create zroot/tank && sudo zfs set compression=lz4 atime=off zroot/tank'
+```
+
+И поток — с Mac M4, двумя SSH-сессиями:
+
+```sh
 ssh -J fbsd-3-sel avalok11@fbsd-2-sel.lab.sel \
     'sudo -n zfs send -R zroot/tank/repl@repl-5' \
   | ssh avalok11@fbsd-3-sel.lab.sel \
@@ -300,7 +309,11 @@ ls -l /zroot/tank/data
 
 ```sh
 # на fbsd-3-sel — новый ключ
-sudo ssh-keygen -t ed25519 -f /root/.ssh/zfs_repl -C "zfs-repl@fbsd-3-sel"
+# -N "" обязателен: без него ssh-keygen спросит passphrase и зависнет.
+# У сервисного ключа пароля быть не должно — скрипт репликации работает
+# без участия человека (из cron в Фазе 4).
+ssh fbsd-3-sel 'sudo install -d -m 700 /root/.ssh && \
+    sudo ssh-keygen -t ed25519 -N "" -f /root/.ssh/zfs_repl -C "zfs-repl@fbsd-3-sel"'
 
 # публичный ключ — на CA (файл лежит в /root, поэтому читаем через sudo)
 ssh fbsd-3-sel 'sudo cat /root/.ssh/zfs_repl.pub' \
@@ -415,7 +428,39 @@ echo "zroot/tank/data@repl-5" | sudo tee /var/db/zfs-replication/last-snapshot
 zfs list -t snapshot -o name -r zroot/tank/repl | tail -1
 ```
 
-### 1.6. Проверка сквозного цикла
+### 1.6. Установить скрипт репликации на новый master
+
+Скрипт живёт в репозитории (`docs/phase-1/zfs-replication.sh`) и на `fbsd-1-sel`
+стоял в `/usr/local/sbin/`. На новой ноде его нет — без него шаг 1.7 не запустится.
+
+```sh
+# с Mac M4 — положить скрипт на ноду
+scp docs/phase-1/zfs-replication.sh fbsd-3-sel:/tmp/zfs-replication.sh
+ssh fbsd-3-sel 'sudo install -m 755 /tmp/zfs-replication.sh /usr/local/sbin/zfs-replication.sh && \
+    rm -f /tmp/zfs-replication.sh && ls -l /usr/local/sbin/zfs-replication.sh'
+```
+
+Проверить, что скрипт на месте и в нём правильные пути (master сменился, реплика
+осталась прежней):
+
+```sh
+ssh fbsd-3-sel 'sudo grep -E "^(DATASET|REPLICA|KEY|STATE)=" /usr/local/sbin/zfs-replication.sh'
+```
+
+Ожидается:
+
+```
+DATASET="zroot/tank/data"
+REPLICA="zfs-repl@172.16.0.4"
+KEY="/root/.ssh/zfs_repl"
+STATE="/var/db/zfs-replication/last-snapshot"
+```
+
+`DATASET` и `REPLICA` менять не нужно — нода стала master'ом с тем же набором
+датасетов, реплика та же. А вот `KEY` теперь указывает на **новое** поколение
+ключа, а `from=` на реплике — на новый адрес master'а (шаги 1.3 и 1.4).
+
+### 1.7. Проверка сквозного цикла
 
 ```sh
 # на fbsd-3-sel
@@ -492,4 +537,5 @@ split-brain, о котором в roadmap есть отдельный пункт
 - [ ] CRL разложен в `/etc/ssh/ca/revoked_keys` на обеих нодах, sshd перезапущен
 - [ ] `from=` в principals-файле заменён на `172.16.0.5`
 - [ ] Маркер репликации посеян из фактического состояния реплики
+- [ ] Скрипт репликации установлен в `/usr/local/sbin/` на новом master'е
 - [ ] Сквозной цикл репликации проверен: `@repl-6` принят
