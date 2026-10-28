@@ -21,15 +21,47 @@
 | Файл в репо | Путь на ноде | Назначение |
 |---|---|---|
 | `etc/ssh/sshd_config.d/00-hardening.conf` | `/etc/ssh/sshd_config.d/00-hardening.conf` | hardening SSH |
+| `etc/ssh/sshd_config.d/ca.conf` | `/etc/ssh/sshd_config.d/ca.conf` | доверие к CA: host-сертификат, User CA, CRL |
 | `etc/pam.d/sshd` | `/etc/pam.d/sshd` | TOTP через `pam_google_authenticator` |
 | `etc/rc.conf` | `/etc/rc.conf` | hostname, адрес, автозапуск служб |
 | `etc/pf.conf` | `/etc/pf.conf` | файрвол |
 | `etc/resolv.conf` | `/etc/resolv.conf` | DNS и search-домен |
 | `etc/issue.net` | `/etc/issue.net` | баннер при входе по SSH |
 
-Плюс на ноде, но не в этом каталоге: `/etc/ssh/sshd_config.d/ca.conf`
-(доверие к CA из Фазы 0.1) — он попадёт сюда, когда конфиги будут
-приводиться к единому виду.
+Оба файла в `sshd_config.d/` подключаются через `Include /etc/ssh/sshd_config.d/*.conf`
+в основном `sshd_config`, поэтому применяются при каждом `service sshd restart`
+автоматически — отдельная строка `Include` в `sshd_config` не нужна.
+
+`ca.conf` — «настройки для сервера данных по серверу сертификации»: нода
+предъявляет свой host-сертификат, доверяет User CA и проверяет CRL.
+
+```
+HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
+RevokedKeys /etc/ssh/ca/revoked_keys
+```
+
+На `fbsd-2-sel` этот же файл отличается одной строкой — там добавлен
+`AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u`, без него сервисная
+учётка `zfs-repl` не смогла бы войти по сертификату. На `fbsd-3-sel` такой строки
+нет, и это правильно: `zfs-repl` живёт только на реплике.
+
+### Раскладка материалов CA — единая для стенда
+
+Все ноды кладут материалы CA в `/etc/ssh/ca/`:
+
+| Файл | Путь | Права |
+|---|---|---|
+| User CA (публичный ключ) | `/etc/ssh/ca/user_ca.pub` | 644 |
+| CRL (отозванные ключи) | `/etc/ssh/ca/revoked_keys` | 644 |
+| host-сертификат | `/etc/ssh/ssh_host_ed25519_key-cert.pub` | 644 |
+
+Host-сертификат лежит рядом с приватным host-ключом в `/etc/ssh/`, а не в `ca/`:
+`sshd` ищет его рядом с ключом по имени `<имя_ключа>-cert.pub`.
+
+Изначально на `fbsd-3-sel` материалы лежали прямо в `/etc/ssh/`
+(`user_ca.pub`, `revoked_keys`), а на `fbsd-2-sel` — в `/etc/ssh/ca/`.
+Расхождение выравнено 2026-10-28 — см. расхождение 4 ниже.
 
 ## Расхождения, которые нужно закрыть
 
@@ -86,6 +118,38 @@
 и `KbdInteractiveAuthentication yes`. Первая директива переименована в OpenSSH 8.7
 и с тех пор является синонимом второй. Дубликат безвреден, но лишний — убрать
 при сведении с `fbsd-1-sel`/`fbsd-2-sel`.
+
+### 4. Раскладка файлов CA отличалась от других нод — **исправлено 2026-10-28**
+
+На ноде сначала лежало:
+
+```
+TrustedUserCAKeys /etc/ssh/user_ca.pub
+RevokedKeys /etc/ssh/revoked_keys
+```
+
+а на `fbsd-2-sel` — в подкаталоге `/etc/ssh/ca/`:
+
+```
+TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
+RevokedKeys /etc/ssh/ca/revoked_keys
+```
+
+Расхождение было не косметическим: `TrustedUserCAKeys` и `RevokedKeys` указывают
+sshd, **откуда** читать файлы, и CRL кладётся строго по указанному пути. Файл,
+положенный не туда, sshd не прочитает — и отзыв сертификата **не сработает
+молча**: выглядит как успех, а на деле только запись в файл.
+
+**Исправлено:** нода переведена на общий путь `/etc/ssh/ca/`, файлы перенесены,
+`ca.conf` переписан. Теперь раскладка материалов CA на всём стенде одинакова —
+см. раздел «Раскладка материалов CA» выше.
+
+Проверка после любой правки — не «файл лежит», а «sshd читает именно его»:
+
+```sh
+# на каждой ноде — что sshd читает на самом деле
+sudo grep -h '^RevokedKeys' /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config
+```
 
 ## Найденная проблема: `nullok` вырождает второй фактор
 
@@ -181,3 +245,7 @@ auth required   pam_unix.so no_warn try_first_pass
 - `sshguard_enable="YES"` + `pf_enable="YES"` — порядок загрузки: sshguard
   создаёт `/var/db/sshguard/blacklist.pf`, на который ссылается `table <sshguard>`.
   Если файл не создан, PF ругается на отсутствие таблицы.
+- `/etc/ssh/ca/` — каталог с материалами CA (`user_ca.pub`, `revoked_keys`).
+  Создаётся с правами 755, файлы внутри — 644. Если каталога нет, `ca.conf`
+  ссылается на несуществующие пути: sshd стартует, но **проверять сертификаты
+  и отзывать ключи не сможет** — молча.

@@ -116,15 +116,20 @@ master, и нода для jails/bhyve. Разница — в том, что н�
 | Файл | Путь на ноде |
 |---|---|
 | `00-hardening.conf` | `/etc/ssh/sshd_config.d/00-hardening.conf` |
+| `ca.conf` | `/etc/ssh/sshd_config.d/ca.conf` |
 | `sshd` | `/etc/pam.d/sshd` |
 | `rc.conf` | `/etc/rc.conf` |
 | `pf.conf` | `/etc/pf.conf` |
 | `resolv.conf` | `/etc/resolv.conf` |
 | `issue.net` | `/etc/issue.net` |
 
+Оба файла в `sshd_config.d/` подключаются через `Include /etc/ssh/sshd_config.d/*.conf`
+в основном `sshd_config` — отдельная строка `Include` не нужна, файлы применяются
+при каждом `service sshd restart`.
+
 Содержимое лежит в том виде, в каком **реально применено** на ноде, — расхождения
 с целевым состоянием зафиксированы в
-[`config/fbsd-3-sel/README.md`](../../config/fbsd-3-sel/README.md). Оттуда два
+[`config/fbsd-3-sel/README.md`](../../config/fbsd-3-sel/README.md). Оттуда три
 важных пункта:
 
 1. **Баннер скопирован с CA-ноды** — на `fbsd-3-sel` в `issue.net` написано
@@ -135,6 +140,10 @@ master, и нода для jails/bhyve. Разница — в том, что н�
    возвращает успех сразу, не спросив ничего. При `AuthenticationMethods
    publickey,keyboard-interactive:pam` второй фактор для такого пользователя
    становится формальностью. **Надо убрать `nullok`.**
+3. **Раскладка файлов CA приведена к общей** — изначально на ноде материалы лежали
+   прямо в `/etc/ssh/`, а на остальных нодах — в `/etc/ssh/ca/`. CRL надо класть
+   туда, откуда sshd его читает, иначе отзыв не сработает молча. Выровнено
+   2026-10-28, теперь путь на всех нодах одинаковый — см. 0.4.
 
 Применение:
 
@@ -161,19 +170,31 @@ scp fbsd-ca-sel:/usr/local/sshca/hosts/fbsd-3-sel/ssh_host_ed25519_key-cert.pub 
 sudo cp /tmp/ssh_host_ed25519_key-cert.pub /etc/ssh/
 ```
 
-В `sshd_config` должен быть:
+В `sshd_config.d/ca.conf` на ноде (файл применён, лежит в репозитории как
+[`config/fbsd-3-sel/etc/ssh/sshd_config.d/ca.conf`](../../config/fbsd-3-sel/etc/ssh/sshd_config.d/ca.conf)):
 
 ```
 HostCertificate /etc/ssh/ssh_host_ed25519_key-cert.pub
+TrustedUserCAKeys /etc/ssh/ca/user_ca.pub
+RevokedKeys /etc/ssh/ca/revoked_keys
 ```
+
+Первая строка — нода предъявляет свой host-сертификат клиентам. Вторая — нода
+доверяет User CA и проверяет сертификаты входящих. Третья — список отозванных
+ключей. Материалы CA лежат в `/etc/ssh/ca/` — так на всех нодах стенда.
 
 Доверие к CA — на самой ноде и на всех, кто к ней ходит:
 
 ```sh
 # user_ca.pub — на ноду: чтобы нода доверяла CA и проверяла сертификаты
-sudo cp /tmp/user_ca.pub /etc/ssh/
-# в sshd_config.d/ca.conf:
-#   TrustedUserCAKeys /etc/ssh/user_ca.pub
+sudo install -d -m 755 /etc/ssh/ca
+sudo cp /tmp/user_ca.pub /etc/ssh/ca/user_ca.pub
+sudo chmod 644 /etc/ssh/ca/user_ca.pub
+
+# CRL — на всех нодах, где нужен отзыв (файл может отсутствовать, но sshd
+# не сможет проверять отозванные ключи, если его нет)
+sudo touch /etc/ssh/ca/revoked_keys
+sudo chmod 644 /etc/ssh/ca/revoked_keys
 
 # host_ca.pub — пользователю: чтобы клиент доверял host-сертификату ноды
 cp /tmp/host_ca.pub ~/.ssh/host_ca.pub
@@ -181,6 +202,14 @@ cp /tmp/host_ca.pub ~/.ssh/host_ca.pub
 
 Пользовательский каталог — `/home/avalok11/.ssh` (в документации всегда
 `avalok11`, никогда реальное имя учётной записи).
+
+> **Путь к CRL.** CRL кладётся строго туда, откуда его читает sshd: положим не
+> туда — отзыв не сработает молча. На всех нодах стенда путь теперь одинаковый,
+> `/etc/ssh/ca/revoked_keys`. Проверить, что sshd читает именно его:
+>
+> ```sh
+> sudo grep -h '^RevokedKeys' /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config
+> ```
 
 ### 0.5. ZFS-структура
 
@@ -302,21 +331,41 @@ ssh fbsd-3-sel 'sudo cp /tmp/zfs_repl-cert.pub /root/.ssh/zfs_repl-cert.pub && \
 # на CA — старый ключ лежит в каталоге zfs_repl
 ssh fbsd-ca-sel 'sudo /usr/local/sshca/scripts/revoke-ssh.sh user zfs_repl zfs_repl'
 
-# раздать обновлённый CRL на ноды (файл читаемый — 644)
-scp fbsd-ca-sel:/usr/local/sshca/revoked/revoked_keys fbsd-3-sel:/tmp/revoked_keys
-ssh fbsd-3-sel 'sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
+# --- раздать обновлённый CRL на ноды ---
+# Путь на всех нодах стенда одинаковый — /etc/ssh/ca/revoked_keys.
+# Но сначала убеждаемся, что sshd читает именно его: RevokedKeys указывает
+# путь, и файл, положенный не по нему, просто не будет загружен.
+ssh fbsd-3-sel "sudo grep -h '^RevokedKeys' /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config"
+ssh -J fbsd-3-sel fbsd-2-sel "sudo grep -h '^RevokedKeys' /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config"
+# ожидаем в обоих случаях: RevokedKeys /etc/ssh/ca/revoked_keys
+
+# CRL — через Mac: scp между двумя удалёнными хостами требует -3,
+# а хоп через локальную машину работает всегда
+scp fbsd-ca-sel:/usr/local/sshca/revoked/revoked_keys /tmp/revoked_keys
+scp /tmp/revoked_keys fbsd-3-sel:/tmp/revoked_keys
+scp /tmp/revoked_keys fbsd-2-sel:/tmp/revoked_keys
+
+ssh fbsd-3-sel "sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
     sudo chmod 644 /etc/ssh/ca/revoked_keys && rm -f /tmp/revoked_keys && \
-    sudo service sshd restart'
+    sudo service sshd restart"
 
 # то же — на реплику, там сертификаты zfs-repl и проверяются
-scp fbsd-ca-sel:/usr/local/sshca/revoked/revoked_keys fbsd-2-sel:/tmp/revoked_keys
-ssh -J fbsd-3-sel fbsd-2-sel 'sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
+ssh -J fbsd-3-sel fbsd-2-sel "sudo cp /tmp/revoked_keys /etc/ssh/ca/revoked_keys && \
     sudo chmod 644 /etc/ssh/ca/revoked_keys && rm -f /tmp/revoked_keys && \
-    sudo service sshd restart'
+    sudo service sshd restart"
 ```
 
 Отзыв старого ключа **не затрагивает новый**: CRL хранит публичные ключи, а у нового
 сертификата другой ключ.
+
+> **Проверить, что CRL вообще читается.** Если sshd не может прочитать файл по
+> `RevokedKeys`, он не сможет и отклонить отозванный сертификат — то есть
+> отзыв будет выглядеть как успешный, а работать не будет. После рестарта sshd
+> проверь в логе, что CRL прочитан:
+>
+> ```sh
+> ssh fbsd-3-sel 'sudo grep -i "revok" /var/log/auth.log | tail -5'
+> ```
 
 ### 1.4. Обновить `from=` на реплике
 
@@ -420,17 +469,20 @@ split-brain, о котором в roadmap есть отдельный пункт
 - [x] VPS `fbsd-3-sel` создан: FreeBSD 15.1 amd64, 4 ГБ RAM, приватный IP `172.16.0.5`
 - [x] FreeBSD установлена, sshd настроен, root-доступ закрыт
 - [x] PF, sshguard, TOTP применены; конфиги сохранены в [`config/fbsd-3-sel/`](../../config/fbsd-3-sel/)
+- [x] `sshd_config.d/ca.conf` применён (host-сертификат, User CA, CRL) — файл в репозитории
 - [x] Host-сертификат выпущен на CA, положен в `/etc/ssh/`; `user_ca.pub` в `/etc/ssh/`, `host_ca.pub` — в `~/.ssh/` пользователя
 - [x] `zroot` пришёл с образом Selectel — `zpool create` не выполнялся
 - [ ] **Исправить баннер** — сейчас в `issue.net` текст CA-ноды (см. `config/fbsd-3-sel/README.md`)
 - [ ] **Убрать `nullok`** из `/etc/pam.d/sshd` — иначе второй фактор вырождается (см. `config/fbsd-3-sel/README.md`)
 - [ ] Свести `/etc/pf.conf` с единым ruleset (делается в День 3, вместе с VNET)
+- [x] Раскладка файлов CA выровнена по всему стенду: `/etc/ssh/ca/` (2026-10-28)
 
 **День 1 — в работе**
 
 - [ ] `fbsd-3-sel` работает как jump-host к `fbsd-2-sel`
 - [ ] Данные восстановлены с реплики, 14 файлов на месте
-- [ ] Новый сервисный ключ выпущен, старый отозван, CRL разослан
+- [ ] Новый сервисный ключ выпущен (`zfs_repl_3`), старый отозван
+- [ ] CRL разложен в `/etc/ssh/ca/revoked_keys` на обеих нодах, sshd перезапущен
 - [ ] `from=` в principals-файле заменён на `172.16.0.5`
 - [ ] Маркер репликации посеян из фактического состояния реплики
 - [ ] Сквозной цикл репликации проверен: `@repl-6` принят

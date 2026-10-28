@@ -46,6 +46,20 @@ AuthorizedPrincipalsFile /etc/ssh/auth_principals/%u
 `AuthorizedPrincipalsFile` — ключевая директива. Без неё ограничения, описанные ниже,
 не применяются к входам по сертификату.
 
+> **Раскладка файлов CA.** На всех нодах стенда материалы CA лежат в
+> `/etc/ssh/ca/` — `user_ca.pub` и `revoked_keys`. Директивы `TrustedUserCAKeys` и
+> `RevokedKeys` указывают sshd, откуда читать файлы, поэтому **CRL надо класть
+> строго по указанному в `ca.conf` пути** — иначе отзыв сертификата не сработает
+> молча. Проверить на ноде:
+>
+> ```sh
+> sudo grep -h '^RevokedKeys' /etc/ssh/sshd_config.d/*.conf /etc/ssh/sshd_config
+> ```
+>
+> Первоначально на `fbsd-3-sel` материалы лежали прямо в `/etc/ssh/`; раскладка
+> выровнена 2026-10-28. Разбор — в
+> [`config/fbsd-3-sel/README.md`](../../config/fbsd-3-sel/README.md).
+
 ## `/etc/ssh/auth_principals/zfs-repl` на fbsd-2-sel
 
 ```sh

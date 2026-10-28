@@ -40,12 +40,37 @@ config/
       pf.conf
       rc.conf
       resolv.conf
-      ssh/sshd_config.d/00-hardening.conf
+      ssh/sshd_config.d/
+        00-hardening.conf
+        ca.conf
 ```
 
 Путь внутри `etc/` **совпадает с путём на ноде**. Файл
 `fbsd-3-sel/etc/ssh/sshd_config.d/00-hardening.conf` кладётся на ноду как
 `/etc/ssh/sshd_config.d/00-hardening.conf`.
+
+Каталог `sshd_config.d` подключается из основного `sshd_config` строкой
+`Include /etc/ssh/sshd_config.d/*.conf` — поэтому файлы в нём применяются
+автоматически при рестарте sshd, а не по отдельности.
+
+## Инвариант: раскладка файлов CA
+
+Материалы CA лежат на **всех** нодах одинаково:
+
+| Файл | Путь | Права |
+|---|---|---|
+| User CA (публичный ключ) | `/etc/ssh/ca/user_ca.pub` | 644 |
+| CRL (отозванные ключи) | `/etc/ssh/ca/revoked_keys` | 644 |
+| host-сертификат | `/etc/ssh/ssh_host_ed25519_key-cert.pub` | 644 |
+
+Host-сертификат — рядом с приватным host-ключом в `/etc/ssh/`, а не в `ca/`:
+`sshd` ищет его рядом с ключом по имени `<имя_ключа>-cert.pub`.
+
+Почему это зафиксировано: `TrustedUserCAKeys` и `RevokedKeys` — это **пути**, а не
+указания «использовать CRL». Файл, положенный не по указанному пути, sshd просто
+не прочитает, и отзыв сертификата не сработает — **молча**: процедура выглядит
+успешной, а механизм не работает. Разбор — в
+[`fbsd-3-sel/README.md`](./fbsd-3-sel/README.md) → расхождение 4.
 
 ## Инвариант: «как применено»
 
