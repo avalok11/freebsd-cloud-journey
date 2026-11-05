@@ -23,6 +23,19 @@ bastille bootstrap 15.1-RELEASE
 Jail'ы — **потомки** датасета релиза. Отсюда бесплатные снапшоты и клоны: это
 обычные операции ZFS над датасетами.
 
+> **Кто что создаёт** (проверено по исходникам Bastille 1.4.4):
+>
+> | Команда | Что делает |
+> |---|---|
+> | `bastille setup storage` | **только** пишет в `bastille.conf` `bastille_zfs_enable=YES` и `bastille_zfs_zpool`. Датасеты **не создаёт** |
+> | `bastille setup loopback` | клонирует `lo1`, переименовывает в `bastille0`, пишет в `rc.conf` `cloned_interfaces+=lo1` и `ifconfig_lo1_name="bastille0"` |
+> | `bastille bootstrap` | **создаёт всё дерево датасетов**: `${zpool}/${prefix}` (монтируется в `/usr/local/bastille`), `.../jails`, `.../releases`, `.../logs`, `.../templates`, `.../backups`, `.../cache` |
+> | `bastille create` | создаёт датасет конкретного jail'а: `${zpool}/${prefix}/jails/<имя>` и `.../root` |
+>
+> Отсюда важное следствие: `bastille_zfs_enable` и `bastille_zfs_zpool` должны быть
+> выставлены **до** `bootstrap` — иначе он создаст дерево датасетов по умолчанию
+> (`zroot/bastille/...`), а не там, где мы решили.
+
 ### Три типа jail'ов
 
 | Тип | Флаг | Что внутри | Когда брать |
@@ -133,10 +146,50 @@ bastille setup loopback     # только loopback-интерфейс
 bastille setup firewall     # только PF
 ```
 
-Ключевой момент про PF: **Bastille копирует свой дефолтный `pf.conf` в `/etc/pf.conf`
-только если того ещё не существует.** У нас он существует и написан руками — значит,
-Bastille его не тронет. Но и anchor'ы, которые Bastille ожидает увидеть, в нашем
-ruleset отсутствуют. Поэтому в Фазе 2 (День 2) в `pf-ruleset.conf` добавляются:
+#### Опасность: `bastille setup firewall` переписывает наш `pf.conf`
+
+> **Проверено по исходникам Bastille 1.4.4** (`usr/local/share/bastille/setup.sh`,
+> функция `configure_pf`). Раньше здесь было написано, что Bastille трогает
+> `/etc/pf.conf` только если его ещё нет. **Это неверно**, и ошибка опасная.
+
+Поведение `configure_pf` на **существующем** `/etc/pf.conf`, который не создан
+Bastille:
+
+```sh
+sed -i '' "1i\
+## Bastille firewall configuration - start\
+ext_if="$ext_if"\
+\
+set block-policy return\
+scrub in on \$ext_if all fragment reassemble\
+set skip on lo\
+\
+table <jails> persist\
+nat on \$ext_if from <jails> to any -> (\$ext_if:0)\
+rdr-anchor "rdr/*"\
+\
+block in all\
+pass out quick keep state\
+antispoof for \$ext_if\
+\
+anchor "bastille/*"\
+pass in proto tcp from any to any port ssh flags S/SA keep state\
+## Bastille firewall configuration - end
+"
+```
+
+То есть Bastille **вставляет свой блок в начало** файла. А в нём — `block in all`.
+PF работает по **первому совпадению**, поэтому наш `pass in on $ext_if proto tcp
+to port 22`, оказавшийся ниже, станет **мёртвым**: SSH перестанет работать, нода
+станет недоступна снаружи — а Bastille сочтёт, что всё настроил.
+
+Отдельно: голый `bastille setup` (без опций) вызывает `configure_pf` наравне с
+`configure_storage` и `configure_loopback_interface`, поэтому **и он запускать
+нельзя**.
+
+**Что делаем вместо.** Нужен `bastille setup storage` и `bastille setup loopback`
+(безопасны), а PF сводим **вручную** — в Фазе 2, День 3, в тот же
+`pf-ruleset.conf`. Блок Bastille показывает, что именно он ожидает увидеть:
 
 ```pf
 table <jails> persist
@@ -147,11 +200,12 @@ anchor "bastille/*"
 
 и `set skip on lo` вместо `set skip on $lo_if` — клонированный loopback
 `bastille0` принадлежит группе `lo`, и без этого трафик jail'ов попадёт под
-наши правила.
+наши правила. Заметь: в блоке Bastille `set skip on lo` уже есть — то есть
+наша правка совпадает с тем, что Bastille считает правильным.
 
-**Порядок применения:** сначала `bastille setup storage` и `bastille setup loopback`,
-затем наш `pf-ruleset.conf` через `pfctl -f`, и только потом `bastille setup firewall`
-либо ручная правка — чтобы Bastille не затёр наши правила.
+**Порядок применения:** `bastille setup storage` → `bastille setup loopback` →
+наш `pf-ruleset.conf` через `pfctl -f`. Команду `bastille setup firewall` на
+`fbsd-3-sel` не запускаем никогда.
 
 ## Сетевой слой: скрипт jib
 

@@ -71,6 +71,11 @@ Selectel не даст новый VPS.
 ### Неделя 1 — Новая нода, восстановление, Bastille
 **Цель:** поднять `fbsd-3-sel`, вернуть стенду рабочее состояние, jail поднят и слушает HTTP.
 
+> **Дни 0–1 закрыты 2026-10-30.** Нода развёрнута, данные восстановлены с
+> реплики (`zroot/tank/data`, снапшоты `repl-1..repl-6`), сквозной цикл
+> репликации работает. Подробности — в
+> [`00-fbsd-3-sel-provisioning.md`](./00-fbsd-3-sel-provisioning.md) → «Результат Дня 1».
+
 - **День 0 (~3 ч) — Развёртывание `fbsd-3-sel`**
   - VPS в Selectel: FreeBSD 15.1 amd64, 4 ГБ RAM / 40 ГБ SSD, публичный IP, приватный адрес **`172.16.0.5`** (*выполнено 2026-10-27*). Адрес не переиспользуется — `172.16.0.2` остаётся за выбывшей `fbsd-1-sel`, значит `from=` в principals-файле надо менять (День 1)
   - Установка, sshd, закрытый root, баннер
@@ -89,9 +94,9 @@ Selectel не даст новый VPS.
   - Команды: [`00-fbsd-3-sel-provisioning.md`](./00-fbsd-3-sel-provisioning.md) → «День 1»
 
 - **День 2 (~2 ч) — Bastille: установка и bootstrap**
-  - `pkg install bastille` на `fbsd-3-sel`
+  - `pkg install bastille` на `fbsd-3-sel` (актуальная версия — 1.4.4)
   - В `bastille.conf` выставить `bastille_zfs_enable="YES"`, `bastille_zfs_zpool="zroot"`, `bastille_zfs_prefix="tank/jails"`. `bastille_zfs_enable` по умолчанию `NO` — без него jail'ы не будут датасетами и не получат снапшотов
-  - `bastille setup storage` и `bastille setup loopback`. **`setup firewall` пока не запускаем** — добавим anchor'ы Bastille в наш `pf-ruleset.conf` сами, на Дне 3
+  - `bastille setup storage` и `bastille setup loopback`
   - **Bootstrap.** В FreeBSD 15 базовая система управляется через `pkgbase`, поэтому для тонких jail'ов:
     ```sh
     bastille bootstrap --pkgbase 15.1-RELEASE
@@ -99,6 +104,18 @@ Selectel не даст новый VPS.
     Классический `bastille bootstrap 15.1-RELEASE update` — workflow для jail'ов на FreeBSD 14.x. На 15.1 workflow другой, это надо учесть.
   - Проверка: `bastille list`, `zfs list zroot/tank/jails` — jail'ы должны лежать именно там, где мы сказали
   - **Артефакт:** вывод `bastille list` и `zfs list` в отчёте фазы
+
+  > **Никогда не запускать голый `bastille setup` и `bastille setup firewall` на
+  > `fbsd-3-sel`.** Проверено по исходникам Bastille 1.4.4: `configure_pf` на
+  > существующем чужом `pf.conf` **вставляет свой блок в начало файла**, а в нём
+  > `block in all`. PF работает по первому совпадению → наше правило
+  > `pass ... port 22` окажется после `block in all` и станет мёртвым → **SSH
+  > перестанет работать, нода станет недоступна**. Голый `bastille setup` вызывает
+  > `configure_pf` наравне с остальными шагами, поэтому он опасен так же.
+  > Anchor'ы Bastille (`table <jails>`, `nat from <jails>`, `rdr-anchor`,
+  > `anchor "bastille/*"`, `set skip on lo`) добавляем в наш `pf-ruleset.conf`
+  > сами — на Дне 3. Разбор — в
+  > [`02-bastille-vs-others.md`](./02-bastille-vs-others.md).
 
 - **День 3 (~2 ч) — Первый jail с VNET**
   - `bastille create web nginx --release 15.1-RELEASE` — jail с nginx

@@ -580,13 +580,116 @@ split-brain, о котором в roadmap есть отдельный пункт
 - [ ] Свести `/etc/pf.conf` с единым ruleset (делается в День 3, вместе с VNET)
 - [x] Раскладка файлов CA выровнена по всему стенду: `/etc/ssh/ca/` (2026-10-28)
 
-**День 1 — в работе**
+**День 2 — выполнен 2026-11-05**
 
-- [ ] `fbsd-3-sel` работает как jump-host к `fbsd-2-sel`
-- [ ] Данные восстановлены с реплики, 14 файлов на месте
-- [ ] Новый сервисный ключ выпущен (`zfs_repl_3`), старый отозван
-- [ ] CRL разложен в `/etc/ssh/ca/revoked_keys` на обеих нодах, sshd перезапущен
-- [ ] `from=` в principals-файле заменён на `172.16.0.5`
-- [ ] Маркер репликации посеян из фактического состояния реплики
-- [ ] Скрипт репликации установлен в `/usr/local/sbin/` на новом master'е
-- [ ] Сквозной цикл репликации проверен: `@repl-6` принят
+- [x] `pkg install bastille` — установлена Bastille 1.4.4
+- [x] `bastille.conf`: `bastille_zfs_enable=YES`, `bastille_zfs_zpool=zroot`, `bastille_zfs_prefix=tank/jails`
+- [x] `bastille setup storage` — безопасно, только пишет параметры в конфиг
+- [x] `bastille setup loopback` — клонирован `lo1`, переименован в `bastille0`
+- [x] `bastille bootstrap --pkgbase 15.1-RELEASE` — создан релиз `FreeBSD-set-base-jail`
+- [x] Дерево датасетов создано bootstrap'ом: `zroot/tank/jails` → `/usr/local/bastille`
+- [ ] `bastille0` поднят и `cloned_interfaces` в `rc.conf` зафиксирован
+- [ ] `config/fbsd-3-sel/etc/rc.conf` обновлён под изменения Bastille
+
+### Результат Дня 2
+
+Bastille поставлена и настроена, релиз FreeBSD 15.1 bootstrapped через pkgbase.
+
+```
+zroot/tank/jails                        515M  /usr/local/bastille
+zroot/tank/jails/backups                 96K  /usr/local/bastille/backups
+zroot/tank/jails/cache                  192K  /usr/local/bastille/cache
+zroot/tank/jails/cache/15.1-RELEASE      96K  /usr/local/bastille/cache/15.1-RELEASE
+zroot/tank/jails/jails                   96K  /usr/local/bastille/jails
+zroot/tank/jails/logs                    96K  /var/log/bastille
+zroot/tank/jails/releases                514M  /usr/local/bastille/releases
+zroot/tank/jails/releases/15.1-RELEASE  514M  /usr/local/bastille/releases/15.1-RELEASE
+zroot/tank/jails/templates               96K  /usr/local/bastille/templates
+```
+
+`bastille list` пуст — это **правильно**: команда показывает jail'ы, а их создание
+(`bastille create`) запланировано на День 3. Проверять надо релиз:
+
+```sh
+sudo bastille list releases     # ждём 15.1-RELEASE
+```
+
+**Двойное «jails» в пути — не баг.** Датасет jail'ов создаётся как
+`${zpool}/${prefix}/jails/<имя>`, а `prefix` у нас `tank/jails` — отсюда
+`zroot/tank/jails/jails/<имя>`. Это осознанный размен: отдельный датасет под
+Bastille вместо того, чтобы класть его в `zroot/tank`, где живёт наша
+реплицируемая дата. Разбор — в
+[`02-bastille-vs-others.md`](./02-bastille-vs-others.md).
+
+**Грабли, которые чуть не стоили ноды.** `bastille setup firewall` на существующем
+чужом `pf.conf` **вставляет свой блок в начало файла**, а в нём — `block in all`.
+PF работает по первому совпадению → наше правило на SSH оказалось бы после
+`block in all` и стало мёртвым: SSH перестал бы работать, нода стала бы
+недоступна снаружи. Голый `bastille setup` вызывает ту же функцию. Поэтому
+запускались только `setup storage` и `setup loopback`, а anchor'ы Bastille
+добавляются в наш `pf-ruleset.conf` вручную — на Дне 3.
+
+**Побочный эффект.** `bastille setup loopback` изменил `/etc/rc.conf` на ноде
+(добавил `cloned_interfaces+=lo1` и `ifconfig_lo1_name="bastille0"`). Значит
+`config/fbsd-3-sel/etc/rc.conf` в репозитории устарел — инвариант «как
+применено» требует его обновить.
+
+**День 1 — выполнен 2026-10-30**
+
+- [x] `fbsd-3-sel` работает как jump-host к `fbsd-2-sel`
+- [x] Данные восстановлены с реплики: `zroot/tank/data` со снапшотами `repl-1..repl-5`
+- [x] Файлы на месте: 14 в `repl-test/`, 100 в `test/`
+- [x] Сервисный ключ `zfs_repl` **переиспользован** (уцелел в бэкапе), ротация не потребовалась
+- [x] `from=` приведён к `172.16.0.2,172.16.0.5` — оставлены оба адреса, см. риск ниже
+- [x] Маркер репликации посеян и обновлён самим скриптом до `zroot/tank/data@repl-6`
+- [x] Скрипт репликации установлен в `/usr/local/sbin/` на новом master'е
+- [x] Сквозной цикл репликации проверен: `@repl-6` принят репликой
+
+### Результат Дня 1
+
+Стенд снова живой: `fbsd-3-sel` — источник данных, `fbsd-2-sel` — реплика, доступ
+к реплике идёт через новый jump-host.
+
+```
+zroot/tank/data          ← master (fbsd-3-sel), восстановлен с реплики
+  repl-1 … repl-6        ← цепочка снапшотов, repl-6 отправлен на реплику
+  test/      100 файлов
+  repl-test/  14 файлов
+
+zroot/tank/repl          ← replica (fbsd-2-sel)
+  repl-1 … repl-6
+```
+
+Маркер `/var/db/zfs-replication/last-snapshot` содержит `zroot/tank/data@repl-6` —
+это самостоятельное подтверждение успеха: скрипт пишет маркер **только после
+удачной отправки**, при ошибке `set -e` прерывает его, и маркер остаётся прежним.
+
+**Что не сработало по плану и почему это нормально.** Ротация ключа не
+проводилась: приватный ключ `zfs_repl` не был потерян, он сохранился в бэкапе
+(KeePassXC). Значит, отзывать нечего, CRL не пересобирался, каталог `zfs_repl_3`
+на CA не создавался. План ротации остаётся в силе как регламент на случай
+реальной утечки — но как учебный кейс «первый отзыв сертификата» он в этом прогоне
+не отработал.
+
+**Открытый риск.** В `from=` оставлены оба адреса, а сервисный ключ теперь
+лежит на новом master'е. Пока `fbsd-1-sel` не запускается — безопасно. Если она
+вернётся и запустит свою репликацию, на реплике окажется два источника с одним
+ключом, и цепочка инкрементов разойдётся. Убрать `172.16.0.2` из списка, когда
+роль `fbsd-1-sel` определится.
+
+### Грабли Дня 1
+
+- **Опечатка в `from=` закрывает доступ молча.** `from="172.16.0.2,172.6.0.5"` —
+  потерянная цифра `1` в адресе нового master'а. sshd сравнивает адрес
+  посимвольно и просто отказывает в аутентификации; скрипт репликации падает на
+  `Permission denied (publickey)`, а снапшот `@repl-6` при этом **создаётся** —
+  и выглядит как успех. Проверять надо **реплику**, а не master.
+- **Маркер — надёжнее, чем список снапшотов.** Он обновляется только после
+  успешной отправки, поэтому `repl-6` в маркере доказывает доставку, а
+  `@repl-6` в `zfs list` на master'е — нет.
+- **`ls -l` показал два каталога, а не файлы.** Данные лежат в подкаталогах
+  `test/` и `repl-test/`; считать надо рекурсивно через `find`.
+- **Сертификат обязан лежать рядом с приватным ключом.** На master'е это
+  `/root/.ssh/zfs_repl-cert.pub` рядом с `/root/.ssh/zfs_repl` — иначе клиент
+  предъявит голый публичный ключ, а у `zfs-repl` намеренно нет
+  `authorized_keys`, и вход откажет.
