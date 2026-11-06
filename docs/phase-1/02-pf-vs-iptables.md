@@ -92,48 +92,94 @@ tcp_services = "{ ssh, http, https }"
 table <sshguard> persist file "/var/db/sshguard/blacklist.pf"
 table <blocked> persist
 
+# === Опции ===
+set block-policy return
+
 # === Нормализация ===
 scrub in on $ext_if all fragment reassemble
 
 # === Loopback ===
-set skip on lo0
+set skip on lo
 
 # === Перенаправления (rdr) ===
-# rdr pass on $ext_if proto tcp to port 80 -> 192.168.1.10 port 80
+# rdr on $ext_if proto tcp to port 80 -> 192.168.1.10 port 80
 
 # === NAT ===
-# nat on $ext_if from 192.168.1.0/24 to any -> ($ext_if)
+# nat on $ext_if from 192.168.1.0/24 to any -> ($ext_if:0)
 
-# === Блокировки ===
+# === Блокировки (quick — терминальны) ===
 block in quick from <sshguard>
 block in quick from <blocked>
 
-# === Базовые правила ===
+# === Дефолт-политика ===
+# ВАЖНО: разрешения ниже обязаны стоять ПОСЛЕ этой строки — см. «Порядок обработки»
 block in all
-pass out all keep state
 
 # === Разрешённые сервисы ===
-pass in inet proto tcp to port $tcp_services
+pass in inet proto tcp to port $tcp_services keep state
+
+# === Исходящий трафик ===
+pass out all keep state
 ```
 
 ### Порядок обработки
 
-PF обрабатывает правила **сверху вниз**, **последнее совпавшее выигрывает** (last match wins). Исключение — `quick` (при совпадении дальше не идёт).
+PF обрабатывает правила **сверху вниз**, и **последнее совпавшее правило решает**
+(last match wins). `pf.conf(5)`, FreeBSD 15.1, раздел PACKET FILTERING:
+
+> For each packet processed by the packet filter, the filter rules are
+> evaluated in sequential order, from first to last. For `block` and `pass`,
+> the last matching rule decides what action is taken.
+
+То же самое в официальном FAQ OpenBSD (на OpenNet этот же текст переведён
+как «Правило в pf: последнее совпавшее или первое?»):
+
+> **The last matching rule wins**, but there is one exception to this:
+> The `quick` option on a filtering rule has the effect of canceling
+> any further rule processing and causes the specified action to be taken.
+
+Отсюда практическое правило: **дефолт-политика `block in all` стоит ВЫШЕ
+разрешающих правил**. Разрешение, которое стоит ниже, совпадёт позже и
+перебьёт catch-all. Если поменять их местами, `block in all` срежет всё
+входящее, а правила ниже станут мёртвыми — PF не выдаст ошибки, он просто
+перестанет пускать.
 
 ```
-pass in proto tcp to port 22        # совпало
-pass in proto tcp to port 80        # совпало
-block in all                        # совпало — правило, последнее совпадение
-# Итог: BLOCK (последнее выигрывает)
+block in all                        # совпало → действие «block», но разбор идёт дальше
+pass in proto tcp to port 22        # совпало позже → действие «pass»
+# Итог: PASS для :22, block для всего остального входящего
 ```
 
-Чтобы изменить логику, используют `quick`:
+`quick` превращает правило в терминальное: оно сразу считается последним
+совпавшим, и разбор правил прекращается.
+
 ```
+pass in quick proto tcp to port 22   # совпало → СТОП, дальше не идём
 block in all
-pass in quick proto tcp to port 22   # если совпало — СТОП, дальше не идёт
-pass in proto tcp to port 80
-# Итог: pass для :22, pass для :80, block для остального
+# Итог: pass для :22, block для остального
 ```
+
+**Где «первое совпадение» — правда.** Такая фраза в `pf.conf(5)` тоже есть,
+но относится к секции **трансляции** (nat/rdr/binat), а не к фильтрации:
+
+> Rules of the same type are evaluated in the same order in which they appear
+> in the ruleset. The first matching rule decides what action is taken.
+
+Итого: для `nat`/`rdr` действует первое совпадение, для `block`/`pass` —
+последнее. Путаница между этими двумя секциями — ровно тот источник ошибки,
+который был в этом репозитории (см. ниже).
+
+**`pass out` не спасает `pass in`.** Направление в правилах не взаимозаменяемо:
+`block in all` блокирует только входящие пакеты, исходящие идут по своим
+правилам.
+
+> **Именно из-за этой путаницы в репозитории побывал сломанный ruleset.**
+> В `docs/phase-1/pf-ruleset.conf` v2.1 разрешающие правила стояли **выше**
+> `block in all` — а это, наоборот, ломало SSH: при «последнее совпавшее
+> решает» catch-all совпадал позже и перебивал разрешение. На живой ноде
+> `config/fbsd-3-sel/etc/pf.conf` порядок был правильный (`block in all` выше
+> разрешений) — и SSH работал. Оба ruleset'а пересобраны в версиях 2.2 и 3.1,
+> разбор — в [отчёте Фазы 2](../phase-2/phase-2-report.md).
 
 ## 5. Таблицы — динамические списки
 

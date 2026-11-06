@@ -450,11 +450,16 @@ pass in proto tcp from any to any port ssh flags S/SA keep state
 ## Bastille firewall configuration - end
 ```
 
-PF работает по **первому совпадению**, поэтому наше правило
-`pass in on $ext_if proto tcp to port 22`, оказавшееся ниже `block in all`,
-становится **мёртвым**: SSH перестаёт работать, нода недоступна снаружи — а
-Bastille считает, что всё настроил. Голый `bastille setup` (без опций)
-вызывает `configure_pf` наравне с остальными шагами, поэтому он опасен так же.
+В PF выигрывает **последнее совпавшее** правило («For `block` and `pass`, the last
+matching rule decides what action is taken», `pf.conf(5)`, раздел PACKET FILTERING;
+OpenBSD PF FAQ: «The last matching rule wins»), поэтому блок Bastille сам по себе
+не «обрубает» SSH — наши разрешения, стоящие ниже, его перебьют. Реальный вред
+в другом: дублируются `scrub`, NAT и anchor'ы, `set block-policy return` меняет
+политику блокировки для всего ruleset, а `pass out quick keep state` из блока
+Bastille оказывается выше нашего ruleset'а и становится терминальным для
+исходящего трафика. Плюс файл в репозитории перестаёт соответствовать ноде.
+Голый `bastille setup` (без опций) вызывает `configure_pf` наравне с остальными
+шагами, поэтому он опасен так же.
 
 Поэтому запускались только `setup storage` и `setup loopback`, а anchor'ы Bastille
 добавляются в наш `pf-ruleset.conf` вручную — на Дне 3. Блок Bastille заодно

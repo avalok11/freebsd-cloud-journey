@@ -29,12 +29,22 @@ Jail'ы — **потомки** датасета релиза. Отсюда бе�
 > |---|---|
 > | `bastille setup storage` | **только** пишет в `bastille.conf` `bastille_zfs_enable=YES` и `bastille_zfs_zpool`. Датасеты **не создаёт** |
 > | `bastille setup loopback` | клонирует `lo1`, переименовывает в `bastille0`, пишет в `rc.conf` `cloned_interfaces+=lo1` и `ifconfig_lo1_name="bastille0"` |
+> | `bastille setup vnet` | **безопасен**: кладёт `jib` из `/usr/share/examples/jails/jib` в `/usr/local/bin/jib` и пишет `/etc/devfs.rules` с `bastille_vnet=13`. PF не трогает |
+> | `bastille setup bridge <if>` | создаёт мост `<if>bridge` и **добавляет в него физический интерфейс `<if>`** (`ifconfig <if>bridge addm <if> up`), ставит `net.inet.ip.forwarding=1` и `net.link.bridge.pfil_{bridge,onlyip,member}=0`, пишет в `rc.conf` `cloned_interfaces+=bridge0`, `ifconfig_bridge0_name="<if>bridge"`, `ifconfig_<if>bridge="addm <if> up"`. Адрес на мост **не** вешает |
 > | `bastille bootstrap` | **создаёт всё дерево датасетов**: `${zpool}/${prefix}` (монтируется в `/usr/local/bastille`), `.../jails`, `.../releases`, `.../logs`, `.../templates`, `.../backups`, `.../cache` |
 > | `bastille create` | создаёт датасет конкретного jail'а: `${zpool}/${prefix}/jails/<имя>` и `.../root` |
 >
 > Отсюда важное следствие: `bastille_zfs_enable` и `bastille_zfs_zpool` должны быть
 > выставлены **до** `bootstrap` — иначе он создаст дерево датасетов по умолчанию
 > (`zroot/bastille/...`), а не там, где мы решили.
+>
+> **А вот `setup bridge` мы не запускаем** — и это не каприте, а следствие трёх
+> вещей: (1) он добавляет физический интерфейс в мост, а на FreeBSD 15 адрес
+> интерфейсу-члену моста назначать уже нельзя — Handbook, «VNET Jails»: адрес
+> должен быть на самом мосте; (2) у нашего `vtnet0` — единственный адрес ноды,
+> и потерять связь с Selectel-сетью нельзя; (3) `pfil_bridge=0` отключает
+> инспекцию bridged-трафика, и трафик jail'а, идущий через мост, ушёл бы мимо PF.
+> Мост мы создаём сами — см. [VNET](./03-vnet-and-network.md).
 
 ### Три типа jail'ов
 
@@ -72,8 +82,8 @@ params:
   net: {
     vnet: true,
     newvnet: true,
-    address: 10.10.1.10/24,
-    gateway: 10.10.1.1,
+    address: 10.10.10.10/24,
+    gateway: 10.10.10.1,
   }
 services:
   - nginx
@@ -112,7 +122,8 @@ Bastille 1.4.x):
 | `bastille_prefix` | `/usr/local/bastille` | префикс и точка монтирования датасета | оставляем |
 | `bastille_network_loopback` | `bastille0` | имя клонированного loopback-интерфейса для jail'ов | оставляем |
 | `bastille_network_pf_ext_if` | `ext_if` | имя **переменной** ext_if в pf.conf | `ext_if` — у нас уже есть такая переменная |
-| `bastille_network_pf_table` | `jails` | имя PF-таблицы с адресами jail'ов | оставляем |
+| `bastille_network_pf_table` | `jails` | имя PF-таблицы с адресами jail'ов | оставляем — но для VNET-jail'ов она всё равно пуста, см. ниже |
+| `bastille_network_gateway` | пусто | шлюз для VNET-jail'ов. Без него Bastille берёт шлюз маршрута по умолчанию хоста (`172.16.0.1`) — это не наш шлюз | **`10.10.10.1`** — адрес на мосте `bridge0` |
 | `bastille_network_vnet_type` | `if_bridge` | тип VNET: мост или netgraph | `if_bridge` |
 | `bastille_pkgbase_packages` | `base-jail` | набор pkgbase-пакетов для bootstrap | оставляем |
 | `bastille_zfs_options` | `-o compress=on -o atime=off` | свойства создаваемых датасетов | оставляем — совпадает с нашими |
@@ -140,11 +151,16 @@ Bastille создаст jail'ы как обычные каталоги на UFS,
 Отдельная команда, готовит хост под работу Bastille:
 
 ```sh
-bastille setup              # всё сразу
-bastille setup storage      # только хранилище
-bastille setup loopback     # только loopback-интерфейс
-bastille setup firewall     # только PF
+bastille setup              # всё сразу — НЕЛЬЗЯ
+bastille setup storage      # только хранилище — безопасно
+bastille setup loopback     # только loopback-интерфейс — безопасно
+bastille setup vnet         # только jib и devfs.rules — безопасно
+bastille setup firewall     # только PF — НЕЛЬЗЯ
+bastille setup bridge <if>  # мост — см. ниже, у нас не используется
 ```
+
+Безопасны ровно три: `storage`, `loopback`, `vnet`. Остальные либо переписывают
+наш `pf.conf` (`firewall`), либо кладут физический интерфейс в мост (`bridge`).
 
 #### Опасность: `bastille setup firewall` переписывает наш `pf.conf`
 
@@ -179,9 +195,34 @@ pass in proto tcp from any to any port ssh flags S/SA keep state\
 ```
 
 То есть Bastille **вставляет свой блок в начало** файла. А в нём — `block in all`.
-PF работает по **первому совпадению**, поэтому наш `pass in on $ext_if proto tcp
-to port 22`, оказавшийся ниже, станет **мёртвым**: SSH перестанет работать, нода
-станет недоступна снаружи — а Bastille сочтёт, что всё настроил.
+
+**Что это значит на самом деле.** Раньше здесь было написано, что блок Bastille
+со своим `block in all` «обрубает SSH». Это верно только при неверной семантике
+«первое совпадение решает». Настоящая семантика PF — **последнее совпавшее
+правило выигрывает** («For `block` and `pass`, the last matching rule decides
+what action is taken», `pf.conf(5)`, раздел PACKET FILTERING; OpenBSD PF FAQ:
+«The last matching rule wins»). С нашим порядком правил (`block in all` выше
+разрешений) получается:
+
+- `block in all` из блока Bastille окажется **выше** наших правил, и наши
+  разрешения (стоящие ниже) его перебьют — SSH продолжит работать;
+- но `pass out quick keep state` из блока Bastille окажется **выше** всего
+  нашего ruleset'а и, будучи `quick`, станет терминальным для исходящего
+  трафика: наши правила ниже для исходящих пакетов разбираться не будут;
+- `set block-policy return` из блока Bastille — это **опция**, а не правило:
+  она действует на весь ruleset, и наше значение её не переопределяет;
+- `scrub`, NAT, `table <jails>`, `rdr-anchor` и `anchor "bastille/*"`
+  продублируются. Для трансляции действует «первое совпадение»
+  (`pf.conf(5)`, раздел TRANSLATION), поэтому при двух NAT-правилах на одну
+  подсеть решает то, что стоит выше;
+- `set skip on lo` из блока Bastille и наш `set skip on lo` конфликтом **не**
+  являются: флаги skip накапливаются, а не перезатираются (pfctl сбрасывает их
+  целиком перед каждой загрузкой ruleset'а и применяет заново из файла).
+
+Итог: `bastille setup firewall` не «обрубает SSH», но **молча превращает наш
+ruleset в гибрид**: часть политики дублируется, часть выключается, а файл в
+репозитории перестаёт соответствовать ноде — а у нас инвариант «`config/` —
+как применено». Поэтому не запускаем.
 
 Отдельно: голый `bastille setup` (без опций) вызывает `configure_pf` наравне с
 `configure_storage` и `configure_loopback_interface`, поэтому **и он запускать
@@ -204,15 +245,31 @@ anchor "bastille/*"
 наша правка совпадает с тем, что Bastille считает правильным.
 
 **Порядок применения:** `bastille setup storage` → `bastille setup loopback` →
-наш `pf-ruleset.conf` через `pfctl -f`. Команду `bastille setup firewall` на
-`fbsd-3-sel` не запускаем никогда.
+`bastille setup vnet` → наш ruleset через `pfctl -f`. Команду `bastille setup firewall`
+на `fbsd-3-sel` не запускаем никогда.
+
+**Осторожно: таблица `<jails>` для VNET-jail'ов остаётся пустой.** В `start.sh`
+(исходники 1.4.4) добавление адреса jail'а в таблицу обёрнуто в проверку
+`if [ "$(bastille config ${jail} get vnet)" != 'enabled' ]` — то есть только для
+jail'ов **без** VNET. Поэтому `nat on $ext_if from <jails> to any -> ($ext_if:0)`
+из блока Bastille для нашего VNET-jail'а **не сработает**: NAT у нас сделан по
+подсети `10.10.10.0/24`. Таблицу `<jails>` мы в ruleset оставляем — Bastille
+проверяет её наличие, — но наполняться она будет только для jail'ов без VNET.
 
 ## Сетевой слой: скрипт jib
 
 Bastille не реализует VNET сам — этим занимается **jib** (Jail Isolate Bridge).
-Он создаёт мост, `epair`-пары и правила PF для каждого jail'а. Отсюда следствие:
-`bastille create` с VNET требует, чтобы сетевые параметры были согласованы между
-`bastille.conf` и фактическим состоянием хоста.
+Он создаёт `epair`-пару, поднимает интерфейсы и добавляет хост-сторону в мост.
+
+Но `jib` работает **только в режиме `-V` (стандартный VNET)**: там он сам создаёт
+мост `<if>bridge` и добавляет в него физический интерфейс — ровно то, чего мы
+решили избегать. В режиме `-B` (мост) `jib` не вызывается вовсе: хост-сторона
+`epair` добавляется в готовый мост напрямую (`ifconfig <bridge> addm <epair>`),
+а параметры сети попадают в jail через шаблон `default/vnet` — он пишет в
+`/etc/rc.conf` jail'а `ifconfig_vnet0="inet <ip>"` и `defaultrouter="<шлюз>"`.
+
+Мы идём по второму пути: мост `bridge0` создаём сами, без физического интерфейса
+внутри. Подробности — в [VNET](./03-vnet-and-network.md).
 
 ## Лимиты ресурсов: bastille limits
 
@@ -247,6 +304,7 @@ Bastillefile работает на обеих архитектурах» это 
 ```sh
 bastille setup storage               # подготовить хранилище
 bastille setup loopback              # подготовить loopback-интерфейс
+bastille setup vnet                  # подготовить jib и devfs.rules
 bastille bootstrap --pkgbase 15.1-RELEASE
 bastille list                       # что есть: jail'ы, релизы, шаблоны
 bastille create -f Bastillefile    # создать jail из файла

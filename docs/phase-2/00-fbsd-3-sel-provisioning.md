@@ -622,12 +622,13 @@ Bastille вместо того, чтобы класть его в `zroot/tank`, 
 [`02-bastille-vs-others.md`](./02-bastille-vs-others.md).
 
 **Грабли, которые чуть не стоили ноды.** `bastille setup firewall` на существующем
-чужом `pf.conf` **вставляет свой блок в начало файла**, а в нём — `block in all`.
-PF работает по первому совпадению → наше правило на SSH оказалось бы после
-`block in all` и стало мёртвым: SSH перестал бы работать, нода стала бы
-недоступна снаружи. Голый `bastille setup` вызывает ту же функцию. Поэтому
-запускались только `setup storage` и `setup loopback`, а anchor'ы Bastille
-добавляются в наш `pf-ruleset.conf` вручную — на Дне 3.
+чужом `pf.conf` **вставляет свой блок в начало файла**, а в нём — `block in all`,
+свой NAT, свой `scrub` и `pass out quick keep state`. Правила PF выигрывает
+**последнее совпавшее**, поэтому гибрид из двух ruleset'ов — это дубли и молчаливо
+выключенные куски политики, а файл в репозитории перестаёт соответствовать ноде.
+Голый `bastille setup` вызывает ту же функцию. Поэтому запускались только
+`setup storage` и `setup loopback`, а anchor'ы Bastille добавляются в наш
+`pf-ruleset.conf` вручную — на Дне 3.
 
 **Побочный эффект.** `bastille setup loopback` изменил `/etc/rc.conf` на ноде
 (добавил `cloned_interfaces+=lo1` и `ifconfig_lo1_name="bastille0"`). Значит

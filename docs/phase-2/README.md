@@ -118,12 +118,32 @@ Selectel не даст новый VPS.
   > [`02-bastille-vs-others.md`](./02-bastille-vs-others.md).
 
 - **День 3 (~2 ч) — Первый jail с VNET**
-  - `bastille create web nginx --release 15.1-RELEASE` — jail с nginx
-  - VNET: jail получает адрес из заданной подсети, выход в интернет через NAT на хосте
-  - В `pf-ruleset.conf` добавить то, что ожидает Bastille: `table <jails> persist`, `nat on $ext_if from <jails> to any -> ($ext_if:0)`, `rdr-anchor "rdr/*"`, `anchor "bastille/*"`, и `set skip on lo` вместо `set skip на $lo_if` (клонированный `bastille0` принадлежит группе `lo`)
-  - Применить: `sudo pfctl -nf /etc/pf.conf && sudo pfctl -f /etc/pf.conf`
-  - Проверить изнутри jail: `ping 8.8.8.8`, снаружи: `curl http://<ip-jail>/`
+  - **Схема сети.** Jail'ы живут в `10.10.10.0/24` ([architecture.md](../architecture.md), сеть
+    «Bastille VNET»). Мост `bridge0` — **только** для jail'ов: физического интерфейса внутри
+    нет, на самом мосте шлюз jail'ов `10.10.10.1/24`. Трафик jail'а маршрутизирует хост
+    (`net.inet.ip.forwarding=1`) и NAT'ится в `172.16.0.5`. Почему именно так —
+    в [`03-vnet-and-network.md`](./03-vnet-and-network.md)
+  - **Порядок действий**, каждый шаг — с проверкой:
+    1. Снять фактическое состояние: `pfctl -si`, `pfctl -sr`, `cat /etc/pf.conf`,
+       `bastille list releases`, `bastille version`
+    2. `bastille setup vnet` — ставит `jib` и `/etc/devfs.rules` (`bastille_vnet=13`). PF не трогает
+    3. Мост и форвардинг: `sysrc cloned_interfaces+=bridge0`,
+       `sysrc ifconfig_bridge0="inet 10.10.10.1/24 up"`, `sysrc gateway_enable=YES`
+    4. PF: применить [`pf-ruleset-jails.conf`](./pf-ruleset-jails.conf) — сперва
+       `sudo pfctl -nf /etc/pf.conf` (только проверка), затем `sudo pfctl -f /etc/pf.conf`
+    5. `bastille create -B web 15.1-RELEASE 10.10.10.10/24 bridge0 --gateway 10.10.10.1`
+    6. `bastille pkg web install nginx`, затем `bastille cmd web sysrc nginx_enable=YES`
+       и `bastille cmd web service nginx start`
+    7. Проверки: изнутри `bastille cmd web ping -c2 8.8.8.8`, с хоста
+       `curl http://10.10.10.10/`, снаружи — через `rdr` в тот же `pf.conf`
   - **Артефакт:** конфиг VNET + вывод проверок
+  - **Процедура:** [`day3-vnet-runbook.md`](./day3-vnet-runbook.md) — пошагово, с проверками
+    на каждом шаге и откатом PF
+
+  > **Важно.** В Bastille 1.4.4 у `bastille create` нет ни флага `--release`, ни синтаксиса
+  > `bastille create web nginx` — сервисы описываются Bastillefile'ом (День 4). Пакеты ставятся
+  > отдельно: `bastille pkg web install nginx`. И `bastille rdr` для VNET-jail'ов **не работает**
+  > (`rdr.sh`: «VNET jails do not support rdr») — правило `rdr` пишем руками.
 
 ### Неделя 2 — Шаблонизация, переносимость, изоляция
 **Цель:** сервис описывается файлом; один и тот же файл работает на arm64 и amd64; изоляция jail'а от хоста подтверждена.
@@ -184,11 +204,13 @@ Selectel не даст новый VPS.
 | **Selectel не даст новый VPS** | Ресурсы в дата-центре кончились — `fbsd-1-sel` не запускается именно из-за этого. Новый VPS могут и не дать | Фолбэк: jails/Bastille → `fbsd-arm` (локально, arm64), bhyve → `fbsd-2-sel` (amd64, работает). Подробно — в [плане развёртывания](./00-fbsd-3-sel-provisioning.md) → «Фолбэк» |
 | **Приватный IP новой ноды** | `fbsd-3-sel` получила `172.16.0.5`, а `from="172.16.0.2"` на реплике остался от выбывшей ноды — без правки репликация будет отвергнута | Заменить `from=` на `172.16.0.5` (День 1). **Не оставлять оба адреса**: два master'а на одну реплику = расхождение цепочки инкрементов |
 | **Расхождение PF ruleset** | На новой ноде применён упрощённый `/etc/pf.conf`, а не единый `pf-ruleset.conf` v2: нет `antispoof` и `set block-policy return`, другое имя переменной SSH-порта | Сойтись с единым ruleset в День 3, когда добавляются anchor'ы Bastille. Расхождения перечислены в [`config/fbsd-3-sel/README.md`](../../config/fbsd-3-sel/README.md) |
+| **Порядок правил в PF** | В `pf-ruleset.conf` v2.1 разрешающие правила стояли **выше** `block in all`. В PF выигрывает **последнее совпавшее** правило («For `block` and `pass`, the last matching rule decides what action is taken», `pf.conf(5)`), поэтому catch-all перебивал бы разрешение — SSH на ноде отвалился бы. Ошибка выросла из неверной формулировки в [`02-pf-vs-iptables.md`](../phase-1/02-pf-vs-iptables.md): там было написано, что PF работает по первому совпадению | Исправлено в v2.2 и v3.1: `block in all` выше разрешений, разрешения — ниже catch-all. На Дне 3 — снять фактическое состояние `pfctl -sr` и сверить **порядок** правил, а не только их наличие |
 | **`nullok` вырождает второй фактор** | `pam_google_authenticator ... nullok` + `sufficient` = для пользователя без TOTP PAM возвращает успех, не спрашивая ничего. При `AuthenticationMethods publickey,keyboard-interactive:pam` второй фактор становится формальностью | Убрать `nullok`. Разбор — в [`config/fbsd-3-sel/README.md`](../../config/fbsd-3-sel/README.md) |
 | **Путь к CRL расходился** | На `fbsd-3-sel` в `ca.conf` был `RevokedKeys /etc/ssh/revoked_keys`, в документации — `/etc/ssh/ca/revoked_keys`. CRL, положенный не по тому пути, не загрузится, и отзыв не сработает **молча** | **Исправлено 2026-10-28:** нода переведена на `/etc/ssh/ca/`, раскладка на всём стенде единая |
 | **RAM под bhyve** | Гостю 512 МБ; на 4 ГБ — свободно, на 1 ГБ было бы впритык | На `fbsd-3-sel` 4 ГБ — вопрос снят |
 | **pkgbase на FreeBSD 15** | Базовая система в 15.x управляется через `pkg`, workflow Bastille другой, чем на 14.x | Учесть при bootstrap: `bastille bootstrap --pkgbase 15.1-RELEASE` |
-| **VNET и PF** | NAT-заглушка в ruleset закомментирована с Фазы 1; Bastille ждёт своих anchor'ов, которых у нас нет | Добавить `table <jails>`, `nat from <jails>`, `rdr-anchor "rdr/*"`, `anchor "bastille/*"` и `set skip on lo` в `pf-ruleset.conf` (День 3) |
+| **VNET и PF** | NAT-заглушка в ruleset закомментирована с Фазы 1; Bastille ждёт своих anchor'ов, которых у нас нет | Добавлено в v2.2/v3.1: `table <jails>`, `rdr-anchor "rdr/*"`, `anchor "bastille/*"`, `set skip на группу lo`. **NAT — по подсети `10.10.10.0/24`, а не по таблице `<jails>`**: Bastille наполняет `<jails>` только для jail'ов без VNET (см. `start.sh` в исходниках 1.4.4) |
+| **Физический интерфейс в мосте** | `bastille setup bridge <if>` добавляет `<if>` в мост, а на FreeBSD 15 адрес интерфейсу-члену моста назначать нельзя (Handbook, «VNET Jails»); у `vtnet0` — единственный адрес ноды | Мост создаём сами, без физического интерфейса: `bridge0` только с epair'ами jail'ов, адрес шлюза `10.10.10.1/24` на самом мосте |
 | **Bastille на 15.1** | Поддержка официальная — Getting Started Bastille построен на свежей FreeBSD 15.1 | Риска нет, но документацию надо читать именно по 15.x |
 | **bhyve только на amd64** | На M4 вложенной виртуализации нет, локально bhyve не запустить | Задача выполняется только в Selectel — на `fbsd-3-sel` |
 | **Приватный ключ `zfs_repl`** | Ключ лежал в `/root/.ssh/` на выбывшей ноде — казалось, он потерян | **Оказалось, уцелел в бэкапе (KeePassXC)** — на новом master'е переиспользован, ротация не потребовалась. Процедура ротации с отзывом старого сертификата осталась в плане как регламент |

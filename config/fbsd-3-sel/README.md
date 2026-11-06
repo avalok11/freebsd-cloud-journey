@@ -122,6 +122,29 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 
 ### 2. PF ruleset не тот, что в репо — сходим в День 3
 
+> **Внимание: порядок правил в этом файле — рабочий, и он правильный.**
+> Строка `block in all` стоит **выше** `pass in inet proto tcp to port
+> $tcp_service`. В PF выигрывает **последнее совпавшее** правило
+> («For `block` and `pass`, the last matching rule decides what action is
+> taken», `pf.conf(5)`; OpenBSD PF FAQ: «The last matching rule wins»), поэтому
+> разрешение, стоящее ниже catch-all, перебивает его — и SSH пускает.
+> Именно поэтому `block in all` должен стоять выше разрешений, а не ниже.
+>
+> Ошибка была обратная: в `docs/phase-1/pf-ruleset.conf` v2.1 разрешающие
+> правила стояли выше `block in all` — такой ruleset обрубил бы SSH на ноде.
+> Ошибка выросла из неверной формулировки в
+> [`docs/phase-1/02-pf-vs-iptables.md`](../../docs/phase-1/02-pf-vs-iptables.md):
+> там было написано, что PF работает по первому совпадению. Формулировка
+> исправлена, оба ruleset'а пересобраны (v2.2 и v3.1).
+>
+> **Что из этого следует — выясняем на Дне 3** (шаг 0 runbook'а): сверяем
+> **порядок** правил в загруженном ruleset'е (`sudo pfctl -sr`) с порядком в
+> файле.
+>
+> **Для Фазы 4 (Ansible) это ловушка:** роль, которая раскладывает конфиги из
+> `config/` на ноды, не должна выкатывать текущий `etc/pf.conf` — только
+> `docs/phase-2/pf-ruleset-jails.conf`, и только после проверки `pfctl -nf`.
+
 Файл `etc/pf.conf` на ноде — упрощённая версия. Единый ruleset из
 [`docs/phase-1/pf-ruleset.conf`](../../docs/phase-1/pf-ruleset.conf) отличается:
 
@@ -133,14 +156,26 @@ ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 | переменная SSH-порта | `tcp_services = "{ ssh }"` (set) | `tcp_service = "ssh"` (scalar) | разные имена — при слиянии выбрать одно |
 | ICMP | `pass proto icmp all` | `pass inet proto icmp all` | на ноде разрешён только ICMPv4, ping6 снаружи не проходит |
 | NAT-заглушка под jails | закомментирована | отсутствует | добавится в День 3 вместе с anchor'ами Bastille |
+| порядок правил | `block in all` выше `pass in` (v2.2) | **`block in all` выше `pass in`** | совпадает — порядок рабочий, см. врезку выше |
 | `set skip on lo` | `set skip on $lo_if`, где `lo_if = "lo0"` | `set skip on lo0` | **расхождения между нодой и ruleset нет** — расходится нужное значение: клонированный loopback `bastille0` принадлежит группе `lo`, а не `lo0`. Значит `set skip on lo` надо поставить **в обоих** местах |
 
 Сходим в День 3, когда добавляем VNET: Bastille ждёт `table <jails>`,
 `nat from <jails>`, `rdr-anchor "rdr/*"`, `anchor "bastille/*"` и `set skip on lo`.
-Тогда и заменим файл на единый ruleset, расширенный под jails. Важно: `set skip on lo`
-меняется и в самом `docs/phase-1/pf-ruleset.conf` — сейчас там тоже `lo0`
-через `$lo_if`, то есть расхождение не «нода против репозитория», а «оба против
-требования Bastille».
+Тогда и заменим файл на единый ruleset, расширенный под jails.
+
+Уточнения по итогам разбора исходников Bastille 1.4.4:
+
+- NAT делаем **по подсети** `10.10.10.0/24`, а не по таблице `<jails>`: Bastille
+  наполняет `<jails>` только для jail'ов **без** VNET (`start.sh`), для VNET-jail'а
+  таблица остаётся пустой.
+- `set skip on lo` (группа `lo`, а не `lo0`) — уже стоит в обоих ruleset'ах
+  репозитория: `docs/phase-1/pf-ruleset.conf` (v2.2) и
+  `docs/phase-2/pf-ruleset-jails.conf` (v3.1).
+- Для `fbsd-3-sel` используется **отдельный** ruleset v3.1: правила блока jails
+  ссылаются на интерфейс `bridge0`, которого на других нодах нет, а PF не грузит
+  ruleset с несуществующим интерфейсом.
+
+Процедура — в [`docs/phase-2/day3-vnet-runbook.md`](../../docs/phase-2/day3-vnet-runbook.md).
 
 ### 3. `ChallengeResponseAuthentication` устарел
 
