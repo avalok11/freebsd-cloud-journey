@@ -93,14 +93,27 @@
 - [`docs/phase-1/03-zfs-advanced.md`](./docs/phase-1/03-zfs-advanced.md) — ZFS продвинутый: ARC, zpool, dataset, snapshot, send/receive, encryption, dedup
 - [`docs/phase-1/04-bhyve-vs-kvm.md`](./docs/phase-1/04-bhyve-vs-kvm.md) — bhyve vs KVM vs VMware ESXi, нюанс arm64
 
-### Фаза 2 — Виртуализация и изоляция: jails, bhyve, Bastille (начата: День 0 выполнен)
+### Фаза 2 — Виртуализация и изоляция: jails, bhyve, Bastille (в работе: Дни 0–2 выполнены)
+
+**Отчёт по фазе** — команды, реальный вывод, параметры, технические грабли:
+
+- [`docs/phase-2/phase-2-report.md`](./docs/phase-2/phase-2-report.md) — День 0: развёртывание `fbsd-3-sel`; День 1: восстановление данных с реплики; День 2: установка Bastille и bootstrap
+
+**План и артефакты:**
 
 - [`docs/phase-2/README.md`](./docs/phase-2/README.md) — план по неделям и дням, риски, критерии тестирования
 - [`docs/phase-2/00-fbsd-3-sel-provisioning.md`](./docs/phase-2/00-fbsd-3-sel-provisioning.md) — развёртывание `fbsd-3-sel` **в дополнение** к выбывшему `fbsd-1-sel` и восстановление данных с реплики
+- [`config/fbsd-3-sel/`](./config/fbsd-3-sel/) — конфиги ноды в том виде, в каком применены: PF, sshd, PAM, CA, rc.conf
+
+**Теоретические заметки:**
+
 - [`docs/phase-2/01-jails-vs-containers.md`](./docs/phase-2/01-jails-vs-containers.md) — как устроена изоляция в ядре FreeBSD, сравнение с Docker/LXC
 - [`docs/phase-2/02-bastille-vs-others.md`](./docs/phase-2/02-bastille-vs-others.md) — модель Bastille, типы jail'ов, Bastillefile, pkgbase на 15.x
 - [`docs/phase-2/03-vnet-and-network.md`](./docs/phase-2/03-vnet-and-network.md) — VNET: свой сетевой стек, `bridge` + `epair`, NAT и `rdr`
 - [`docs/phase-2/04-zfs-and-jails.md`](./docs/phase-2/04-zfs-and-jails.md) — jail в ZFS-датасете: снапшоты, клоны, делегирование датасетов
+
+**Связанные заметки Фазы 1:**
+
 - [`docs/phase-1/02-pf-vs-iptables.md`](./docs/phase-1/02-pf-vs-iptables.md) — PF vs iptables/nftables, история, синтаксис
 - [`docs/phase-1/03-zfs-advanced.md`](./docs/phase-1/03-zfs-advanced.md) — ZFS продвинутый: ARC, zpool, dataset, snapshot, send/receive, encryption, dedup
 - [`docs/phase-1/04-bhyve-vs-kvm.md`](./docs/phase-1/04-bhyve-vs-kvm.md) — bhyve vs KVM vs VMware ESXi, нюанс arm64
